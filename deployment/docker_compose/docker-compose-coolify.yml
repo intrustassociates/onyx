@@ -1,37 +1,38 @@
 # =============================================================================
-# ONYX DOCKER COMPOSE
+# ONYX DOCKER COMPOSE - COOLIFY OPTIMIZED
 # =============================================================================
-# This is the default configuration for Onyx. This file is fairly configurable,
-# also see env.template for possible settings.
+# Esta é a configuração otimizada para deployment no Coolify.
+# O Coolify gerencia automaticamente: proxy reverso, SSL/TLS, domínios e routing.
 # 
-# PRODUCTION DEPLOYMENT CHECKLIST:
-# To convert this setup to a production deployment following best practices,
-# follow the checklist below. Note that there are other ways to secure the Onyx
-# deployment so these are not strictly necessary for all teams.
+# CHECKLIST PARA DEPLOYMENT NO COOLIFY:
 #
-# 1. SECURITY HARDENING:
-#    - Remove all port exposures except nginx (80/443)
-#    - Comment out ports for: api_server, relational_db, index, cache, minio
+# 1. PROXY REVERSO:
+#    - Nginx removido (Coolify usa Traefik)
+#    - web_server expõe porta 3000 diretamente
 #
-# 2. SSL/TLS SETUP:
-#    - Uncomment the certbot service (see below)
-#    - Add SSL certificate volumes to nginx service
-#    - Change nginx command from app.conf.template to app.conf.template.prod
+# 2. SSL/TLS:
+#    - Gerenciado automaticamente pelo Coolify
+#    - Certbot não necessário
 #
-# 3. ENVIRONMENT CONFIGURATION:
-#    - Replace env_file with explicit environment variables
+# 3. PORTAS:
+#    - Apenas web_server precisa expor porta
+#    - Outros serviços se comunicam via rede interna do Docker
 #
-# 4. AUTHENTICATION:
-#    - Select an authentication method like Basic, Google OAuth, OIDC, or SAML
+# 4. CONFIGURAÇÃO NO COOLIFY:
+#    - Configure variáveis de ambiente no painel do Coolify
+#    - Defina o domínio no Coolify (não precisa DOMAIN env var)
+#    - SSL será provisionado automaticamente
 #
-# 5. CA CERTIFICATES:
-#    - Uncomment custom CA certificate volumes if needed
+# 5. AUTENTICAÇÃO:
+#    - Configure AUTH_TYPE via variáveis de ambiente do Coolify
 #
-# 6. DOMAIN CONFIGURATION:
-#    - Set proper DOMAIN environment variable for nginx
-#    - Configure DNS and SSL certificates
-#
-# For a complete production setup, refer to docker-compose.prod.yml
+# 6. STORAGE S3:
+#    - Configure obrigatoriamente as variáveis:
+#      * S3_ENDPOINT_URL (ex: https://s3.amazonaws.com)
+#      * S3_AWS_ACCESS_KEY_ID
+#      * S3_AWS_SECRET_ACCESS_KEY
+#      * S3_FILE_STORE_BUCKET_NAME (opcional, padrão: onyx-file-store-bucket)
+#    - Crie o bucket no S3 antes do primeiro deploy
 # =============================================================================
 
 name: onyx
@@ -55,7 +56,6 @@ services:
       - index
       - cache
       - inference_model_server
-      - minio
     restart: unless-stopped
     # DEV: To expose ports, either:
     # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
@@ -69,9 +69,11 @@ services:
       - VESPA_HOST=${VESPA_HOST:-index}
       - REDIS_HOST=${REDIS_HOST:-cache}
       - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID:-minioadmin}
-      - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # S3 Configuration - Configure estas variáveis no Coolify para usar AWS S3 ou outro provedor
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+      - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID}
+      - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY}
+      - S3_FILE_STORE_BUCKET_NAME=${S3_FILE_STORE_BUCKET_NAME:-onyx-file-store-bucket}
     # PRODUCTION: Uncomment the line below to use if IAM_AUTH is true and you are using iam auth for postgres
     # volumes:
     #   - ./bundle.pem:/app/bundle.pem:ro
@@ -114,9 +116,11 @@ services:
       - REDIS_HOST=${REDIS_HOST:-cache}
       - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
       - INDEXING_MODEL_SERVER_HOST=${INDEXING_MODEL_SERVER_HOST:-indexing_model_server}
-      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://minio:9000}
-      - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID:-minioadmin}
-      - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY:-minioadmin}
+      # S3 Configuration - Configure estas variáveis no Coolify para usar AWS S3 ou outro provedor
+      - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+      - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID}
+      - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY}
+      - S3_FILE_STORE_BUCKET_NAME=${S3_FILE_STORE_BUCKET_NAME:-onyx-file-store-bucket}
     # PRODUCTION: Uncomment the line below to use if IAM_AUTH is true and you are using iam auth for postgres
     # volumes:
     #   - ./bundle.pem:/app/bundle.pem:ro
@@ -162,8 +166,16 @@ services:
     depends_on:
       - api_server
     restart: unless-stopped
+    # COOLIFY: Porta exposta para o proxy reverso do Coolify
+    ports:
+      - "3000:3000"
     environment:
       - INTERNAL_URL=${INTERNAL_URL:-http://api_server:8080}
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
 
   inference_model_server:
     image: onyxdotapp/onyx-model-server:${IMAGE_TAG:-latest}
@@ -282,46 +294,6 @@ services:
         max-size: "50m"
         max-file: "6"
 
-  nginx:
-    image: nginx:1.23.4-alpine
-    restart: unless-stopped
-    # nginx will immediately crash with `nginx: [emerg] host not found in upstream`
-    # if api_server / web_server are not up
-    depends_on:
-      - api_server
-      - web_server
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - DOMAIN=localhost
-      # Nginx proxy timeout settings (in seconds)
-      - NGINX_PROXY_CONNECT_TIMEOUT=${NGINX_PROXY_CONNECT_TIMEOUT:-300}
-      - NGINX_PROXY_SEND_TIMEOUT=${NGINX_PROXY_SEND_TIMEOUT:-300}
-      - NGINX_PROXY_READ_TIMEOUT=${NGINX_PROXY_READ_TIMEOUT:-300}
-    ports:
-      - "80:80"
-      - "${HOST_PORT:-3000}:80" # allow for localhost:3000 usage, since that is the norm
-    volumes:
-      - ../data/nginx:/etc/nginx/conf.d
-    # PRODUCTION: Add SSL certificate volumes for HTTPS support:
-    #   - ../data/certbot/conf:/etc/letsencrypt
-    #   - ../data/certbot/www:/var/www/certbot
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
-    # The specified script waits for the api_server to start up.
-    # Without this we've seen issues where nginx shows no error logs but
-    # does not receive any traffic
-    # NOTE: we have to use dos2unix to remove Carriage Return chars from the file
-    # in order to make this work on both Unix-like systems and windows
-    # PRODUCTION: Change to app.conf.template.prod for production nginx config
-    command: >
-      /bin/sh -c "dos2unix /etc/nginx/conf.d/run-nginx.sh 
-      && /etc/nginx/conf.d/run-nginx.sh app.conf.template"
-
   cache:
     image: redis:7.4-alpine
     restart: unless-stopped
@@ -337,51 +309,10 @@ services:
       - path: .env
         required: false
 
-  minio:
-    image: minio/minio:RELEASE.2025-07-23T15-54-02Z-cpuv1
-    restart: unless-stopped
-    # DEV: To expose ports, either:
-    # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    # 2. Uncomment the ports below
-    # ports:
-    #   - "9004:9000"
-    #   - "9005:9001"
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      # Note: we've seen the default bucket creation logic not work in some cases
-      MINIO_DEFAULT_BUCKETS: ${S3_FILE_STORE_BUCKET_NAME:-onyx-file-store-bucket}
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-
-  # PRODUCTION: Uncomment the following certbot service for SSL certificate management
-  # certbot:
-  #   image: certbot/certbot
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ../data/certbot/conf:/etc/letsencrypt
-  #     - ../data/certbot/www:/var/www/certbot
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "50m"
-  #       max-file: "6"
-  #   entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-
 volumes:
   # Necessary for persisting data for use
   db_volume:
   vespa_volume: # Created by the container itself
-  minio_data:
   # Caches to prevent re-downloading models, not strictly necessary
   model_cache_huggingface:
   indexing_huggingface_model_cache:
