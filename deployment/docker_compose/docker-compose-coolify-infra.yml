@@ -1,0 +1,120 @@
+# =============================================================================
+# ONYX INFRAESTRUTURA - COOLIFY
+# =============================================================================
+# Stack de infraestrutura que deve ficar sempre rodando.
+# Serviços pesados que demoram para inicializar: Postgres, Vespa, Redis
+#
+# DEPLOYMENT NO COOLIFY:
+# 1. Crie um novo projeto no Coolify chamado "onyx-infra"
+# 2. Use este arquivo docker-compose-coolify-infra.yml
+# 3. Configure as variáveis de ambiente necessárias
+# 4. Faça o deploy ANTES do stack de aplicação
+#
+# STORAGE S3:
+# - Configure S3 externo (AWS, Cloudflare R2, etc) nas variáveis de ambiente
+# - Não usamos MinIO para simplificar a infraestrutura
+#
+# IMPORTANTE:
+# - Este stack cria a rede "onyx-network" que será usada pela aplicação
+# - Postgres, Vespa e Redis ficam acessíveis na rede interna
+# - Não exponha portas publicamente (segurança)
+# =============================================================================
+
+name: onyx-infra
+
+services:
+  relational_db:
+    image: postgres:15.2-alpine
+    container_name: onyx-postgres
+    shm_size: 1g
+    command: -c 'max_connections=250'
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+    # IMPORTANTE: Não exponha portas em produção
+    # ports:
+    #   - "5432:5432"
+    volumes:
+      - db_volume:/var/lib/postgresql/data
+    networks:
+      - onyx-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+  # This container name cannot have an underscore in it due to Vespa expectations of the URL
+  index:
+    image: vespaengine/vespa:8.526.15
+    container_name: onyx-vespa
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - VESPA_SKIP_UPGRADE_CHECK=${VESPA_SKIP_UPGRADE_CHECK:-true}
+    # IMPORTANTE: Não exponha portas em produção
+    # ports:
+    #   - "19071:19071"
+    #   - "8081:8081"
+    volumes:
+      - vespa_volume:/opt/vespa/var
+    networks:
+      - onyx-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:19071/ApplicationStatus || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+  cache:
+    image: redis:7.4-alpine
+    container_name: onyx-redis
+    restart: unless-stopped
+    # docker silently mounts /data even without an explicit volume mount, which enables
+    # persistence. explicitly setting save and appendonly forces ephemeral behavior.
+    command: redis-server --save "" --appendonly no
+    env_file:
+      - path: .env
+        required: false
+    # IMPORTANTE: Não exponha portas em produção
+    # ports:
+    #   - "6379:6379"
+    networks:
+      - onyx-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "6"
+
+volumes:
+  db_volume:
+  vespa_volume:
+
+networks:
+  onyx-network:
+    name: onyx-network
+    driver: bridge
+

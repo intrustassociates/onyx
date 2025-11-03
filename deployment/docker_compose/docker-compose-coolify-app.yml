@@ -1,97 +1,85 @@
 # =============================================================================
-# ONYX DOCKER COMPOSE - COOLIFY OPTIMIZED
+# ONYX APLICAÇÃO - COOLIFY
 # =============================================================================
-# Esta é a configuração otimizada para deployment no Coolify.
-# O Coolify gerencia automaticamente: proxy reverso, SSL/TLS, domínios e routing.
-# 
-# CHECKLIST PARA DEPLOYMENT NO COOLIFY:
+# Stack de aplicação Onyx que faz deploy rápido.
+# Conecta-se aos serviços de infraestrutura via rede compartilhada.
 #
-# 1. PROXY REVERSO:
-#    - Nginx removido (Coolify usa Traefik)
-#    - web_server expõe porta 3000 diretamente
+# DEPLOYMENT NO COOLIFY:
+# 1. Certifique-se que o stack "onyx-infra" está rodando ANTES
+# 2. Crie um novo projeto no Coolify chamado "onyx-app"
+# 3. Use este arquivo docker-compose-coolify-app.yml
+# 4. Configure as mesmas variáveis de ambiente
+# 5. O Coolify vai expor automaticamente o web_server na porta 3000
 #
-# 2. SSL/TLS:
-#    - Gerenciado automaticamente pelo Coolify
-#    - Certbot não necessário
+# STORAGE S3:
+# - Configure S3 externo obrigatoriamente (AWS, Cloudflare R2, Hetzner, etc)
+# - Variáveis necessárias:
+#   * S3_ENDPOINT_URL (ex: https://s3.amazonaws.com)
+#   * S3_AWS_ACCESS_KEY_ID
+#   * S3_AWS_SECRET_ACCESS_KEY
+#   * S3_FILE_STORE_BUCKET_NAME
 #
-# 3. PORTAS:
-#    - Apenas web_server precisa expor porta
-#    - Outros serviços se comunicam via rede interna do Docker
-#
-# 4. CONFIGURAÇÃO NO COOLIFY:
-#    - Configure variáveis de ambiente no painel do Coolify
-#    - Defina o domínio no Coolify (não precisa DOMAIN env var)
-#    - SSL será provisionado automaticamente
-#
-# 5. AUTENTICAÇÃO:
-#    - Configure AUTH_TYPE via variáveis de ambiente do Coolify
-#
-# 6. STORAGE S3:
-#    - Configure obrigatoriamente as variáveis:
-#      * S3_ENDPOINT_URL (ex: https://s3.amazonaws.com)
-#      * S3_AWS_ACCESS_KEY_ID
-#      * S3_AWS_SECRET_ACCESS_KEY
-#      * S3_FILE_STORE_BUCKET_NAME (opcional, padrão: onyx-file-store-bucket)
-#    - Crie o bucket no S3 antes do primeiro deploy
+# IMPORTANTE:
+# - Este stack conecta na rede "onyx-network" (externa, criada pela infra)
+# - Os hostnames para conectar aos serviços de infra são:
+#   * onyx-postgres (Postgres)
+#   * onyx-vespa (Vespa)
+#   * onyx-redis (Redis)
 # =============================================================================
 
-name: onyx
+name: onyx-app
 
 services:
   api_server:
     image: onyxdotapp/onyx-backend:${IMAGE_TAG:-latest}
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     command: >
       /bin/sh -c "alembic upgrade head &&
       echo \"Starting Onyx Api Server\" &&
       uvicorn onyx.main:app --host 0.0.0.0 --port 8080"
-    # Check env.template and copy to .env for env vars
     env_file:
       - path: .env
         required: false
     depends_on:
-      - relational_db
-      - index
-      - cache
       - inference_model_server
     restart: unless-stopped
-    # DEV: To expose ports, either:
-    # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    # 2. Uncomment the ports below
-    # ports:
-    #   - "8080:8080"
     environment:
       # Auth Settings
       - AUTH_TYPE=${AUTH_TYPE:-basic}
-      - POSTGRES_HOST=${POSTGRES_HOST:-relational_db}
-      - VESPA_HOST=${VESPA_HOST:-index}
-      - REDIS_HOST=${REDIS_HOST:-cache}
-      - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
-      # S3 Configuration - Configure estas variáveis no Coolify para usar AWS S3 ou outro provedor
+      # IMPORTANTE: Usar container_name dos serviços de infra
+      - POSTGRES_HOST=onyx-postgres
+      - VESPA_HOST=onyx-vespa
+      - REDIS_HOST=onyx-redis
+      - MODEL_SERVER_HOST=inference_model_server
+      # S3 Configuration - Configure estas variáveis no Coolify
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
       - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID}
       - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY}
       - S3_FILE_STORE_BUCKET_NAME=${S3_FILE_STORE_BUCKET_NAME:-onyx-file-store-bucket}
-    # PRODUCTION: Uncomment the line below to use if IAM_AUTH is true and you are using iam auth for postgres
-    # volumes:
-    #   - ./bundle.pem:/app/bundle.pem:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - api_server_logs:/var/log/onyx
+    networks:
+      - onyx-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "6"
-    # Optional, only for debugging purposes
-    volumes:
-      - api_server_logs:/var/log/onyx
 
   background:
     image: onyxdotapp/onyx-backend:${IMAGE_TAG:-latest}
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile
     command: >
       /bin/sh -c "
@@ -103,51 +91,38 @@ services:
       - path: .env
         required: false
     depends_on:
-      - relational_db
-      - index
-      - cache
       - inference_model_server
       - indexing_model_server
     restart: unless-stopped
     environment:
       - USE_LIGHTWEIGHT_BACKGROUND_WORKER=${USE_LIGHTWEIGHT_BACKGROUND_WORKER:-true}
-      - POSTGRES_HOST=${POSTGRES_HOST:-relational_db}
-      - VESPA_HOST=${VESPA_HOST:-index}
-      - REDIS_HOST=${REDIS_HOST:-cache}
-      - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
-      - INDEXING_MODEL_SERVER_HOST=${INDEXING_MODEL_SERVER_HOST:-indexing_model_server}
-      # S3 Configuration - Configure estas variáveis no Coolify para usar AWS S3 ou outro provedor
+      # IMPORTANTE: Usar container_name dos serviços de infra
+      - POSTGRES_HOST=onyx-postgres
+      - VESPA_HOST=onyx-vespa
+      - REDIS_HOST=onyx-redis
+      - MODEL_SERVER_HOST=inference_model_server
+      - INDEXING_MODEL_SERVER_HOST=indexing_model_server
+      # S3 Configuration - Configure estas variáveis no Coolify
       - S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
       - S3_AWS_ACCESS_KEY_ID=${S3_AWS_ACCESS_KEY_ID}
       - S3_AWS_SECRET_ACCESS_KEY=${S3_AWS_SECRET_ACCESS_KEY}
       - S3_FILE_STORE_BUCKET_NAME=${S3_FILE_STORE_BUCKET_NAME:-onyx-file-store-bucket}
-    # PRODUCTION: Uncomment the line below to use if IAM_AUTH is true and you are using iam auth for postgres
-    # volumes:
-    #   - ./bundle.pem:/app/bundle.pem:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Optional, only for debugging purposes
     volumes:
       - background_logs:/var/log/onyx
+    networks:
+      - onyx-network
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "6"
-    # PRODUCTION: Uncomment the following lines if you need to include a custom CA certificate
-    # This section enables the use of a custom CA certificate
-    # If present, the custom CA certificate is mounted as a volume
-    # The container checks for its existence and updates the system's CA certificates
-    # This allows for secure communication with services using custom SSL certificates
-    # Optional volume mount for CA certificate
-    # volumes:
-    #   # Maps to the CA_CERT_PATH environment variable in the Dockerfile
-    #   - ${CA_CERT_PATH:-./custom-ca.crt}:/etc/ssl/certs/custom-ca.crt:ro
 
   web_server:
     image: onyxdotapp/onyx-web-server:${IMAGE_TAG:-latest}
     build:
-      context: ./web
+      context: ../../web
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_POSITIVE_PREDEFINED_FEEDBACK_OPTIONS=${NEXT_PUBLIC_POSITIVE_PREDEFINED_FEEDBACK_OPTIONS:-}
@@ -164,13 +139,16 @@ services:
       - path: .env
         required: false
     depends_on:
-      - api_server
+      api_server:
+        condition: service_healthy
     restart: unless-stopped
     # COOLIFY: Porta exposta para o proxy reverso do Coolify
     ports:
       - "3000:3000"
     environment:
       - INTERNAL_URL=${INTERNAL_URL:-http://api_server:8080}
+    networks:
+      - onyx-network
     logging:
       driver: json-file
       options:
@@ -180,7 +158,7 @@ services:
   inference_model_server:
     image: onyxdotapp/onyx-model-server:${IMAGE_TAG:-latest}
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile.model_server
     # GPU Support: Uncomment the following lines to enable GPU support
     # Requires nvidia-container-toolkit to be installed on the host
@@ -207,6 +185,8 @@ services:
       - model_cache_huggingface:/app/.cache/huggingface/
       # Optional, only for debugging purposes
       - inference_model_server_logs:/var/log/onyx
+    networks:
+      - onyx-network
     logging:
       driver: json-file
       options:
@@ -216,7 +196,7 @@ services:
   indexing_model_server:
     image: onyxdotapp/onyx-model-server:${IMAGE_TAG:-latest}
     build:
-      context: ./backend
+      context: ../../backend
       dockerfile: Dockerfile.model_server
     # GPU Support: Uncomment the following lines to enable GPU support
     # Requires nvidia-container-toolkit to be installed on the host
@@ -245,74 +225,15 @@ services:
       - indexing_huggingface_model_cache:/app/.cache/huggingface/
       # Optional, only for debugging purposes
       - indexing_model_server_logs:/var/log/onyx
+    networks:
+      - onyx-network
     logging:
       driver: json-file
       options:
         max-size: "50m"
         max-file: "6"
-
-  relational_db:
-    image: postgres:15.2-alpine
-    shm_size: 1g
-    command: -c 'max_connections=250'
-    env_file:
-      - path: .env
-        required: false
-    restart: unless-stopped
-    # PRODUCTION: Override the defaults by passing in the environment variables
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-    # DEV: To expose ports, either:
-    # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    # 2. Uncomment the ports below
-    # ports:
-    #   - "5432:5432"
-    volumes:
-      - db_volume:/var/lib/postgresql/data
-
-  # This container name cannot have an underscore in it due to Vespa expectations of the URL
-  index:
-    image: vespaengine/vespa:8.526.15
-    restart: unless-stopped
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      - VESPA_SKIP_UPGRADE_CHECK=${VESPA_SKIP_UPGRADE_CHECK:-true}
-    # DEV: To expose ports, either:
-    # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    # 2. Uncomment the ports below
-    # ports:
-    #   - "19071:19071"
-    #   - "8081:8081"
-    volumes:
-      - vespa_volume:/opt/vespa/var
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
-
-  cache:
-    image: redis:7.4-alpine
-    restart: unless-stopped
-    # DEV: To expose ports, either:
-    # 1. Use docker-compose.dev.yml: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    # 2. Uncomment the ports below
-    # ports:
-    #   - "6379:6379"
-    # docker silently mounts /data even without an explicit volume mount, which enables
-    # persistence. explicitly setting save and appendonly forces ephemeral behavior.
-    command: redis-server --save "" --appendonly no
-    env_file:
-      - path: .env
-        required: false
 
 volumes:
-  # Necessary for persisting data for use
-  db_volume:
-  vespa_volume: # Created by the container itself
   # Caches to prevent re-downloading models, not strictly necessary
   model_cache_huggingface:
   indexing_huggingface_model_cache:
@@ -321,3 +242,9 @@ volumes:
   background_logs:
   inference_model_server_logs:
   indexing_model_server_logs:
+
+networks:
+  onyx-network:
+    external: true
+    name: onyx-network
+
