@@ -5,18 +5,18 @@
 # Serviços pesados que demoram para inicializar: Postgres, Vespa, Redis
 #
 # DEPLOYMENT NO COOLIFY:
-# 1. Crie um novo projeto no Coolify chamado "onyx-infra"
-# 2. Use este arquivo docker-compose-coolify-infra.yml
+# 1. Crie um projeto no Coolify chamado "onyx"
+# 2. Adicione este arquivo como PRIMEIRO stack (nome: "infra")
 # 3. Configure as variáveis de ambiente necessárias
-# 4. Faça o deploy ANTES do stack de aplicação
+# 4. Faça o deploy e aguarde o Vespa ficar pronto (~2 min)
 #
 # STORAGE S3:
 # - Configure S3 externo (AWS, Cloudflare R2, etc) nas variáveis de ambiente
 # - Não usamos MinIO para simplificar a infraestrutura
 #
 # IMPORTANTE:
-# - Este stack cria a rede "onyx-network" que será usada pela aplicação
-# - Postgres, Vespa e Redis ficam acessíveis na rede interna
+# - No mesmo projeto do Coolify, todos os stacks compartilham a mesma rede
+# - Postgres, Vespa e Redis ficam acessíveis via container_name
 # - Não exponha portas publicamente (segurança)
 # =============================================================================
 
@@ -40,8 +40,6 @@ services:
     #   - "5432:5432"
     volumes:
       - db_volume:/var/lib/postgresql/data
-    networks:
-      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -69,8 +67,6 @@ services:
     #   - "8081:8081"
     volumes:
       - vespa_volume:/opt/vespa/var
-    networks:
-      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:19071/ApplicationStatus || exit 1"]
       interval: 15s
@@ -96,8 +92,6 @@ services:
     # IMPORTANTE: Não exponha portas em produção
     # ports:
     #   - "6379:6379"
-    networks:
-      - onyx-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -112,9 +106,4 @@ services:
 volumes:
   db_volume:
   vespa_volume:
-
-networks:
-  onyx-network:
-    name: onyx-network
-    driver: bridge
 

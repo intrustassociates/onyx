@@ -5,11 +5,13 @@
 # Conecta-se aos serviços de infraestrutura via rede compartilhada.
 #
 # DEPLOYMENT NO COOLIFY:
-# 1. Certifique-se que o stack "onyx-infra" está rodando ANTES
-# 2. Crie um novo projeto no Coolify chamado "onyx-app"
-# 3. Use este arquivo docker-compose-coolify-app.yml
-# 4. Configure as mesmas variáveis de ambiente
-# 5. O Coolify vai expor automaticamente o web_server na porta 3000
+# 1. No MESMO projeto "onyx", adicione este arquivo como SEGUNDO stack (nome: "app")
+# 2. Certifique-se que o stack "infra" está rodando ANTES
+# 3. Configure as variáveis de ambiente (S3, OpenAI, etc)
+# 4. O Coolify vai expor automaticamente o web_server na porta 3000
+#
+# NOTA: Ambos os stacks devem estar no MESMO projeto do Coolify para
+# compartilharem a rede Docker automaticamente
 #
 # STORAGE S3:
 # - Configure S3 externo obrigatoriamente (AWS, Cloudflare R2, Hetzner, etc)
@@ -20,7 +22,7 @@
 #   * S3_FILE_STORE_BUCKET_NAME
 #
 # IMPORTANTE:
-# - Este stack conecta na rede "onyx-network" (externa, criada pela infra)
+# - No mesmo projeto do Coolify, todos os stacks compartilham a mesma rede
 # - Os hostnames para conectar aos serviços de infra são:
 #   * onyx-postgres (Postgres)
 #   * onyx-vespa (Vespa)
@@ -49,7 +51,7 @@ services:
     environment:
       # Auth Settings
       - AUTH_TYPE=${AUTH_TYPE:-basic}
-      # IMPORTANTE: Usar container_name dos serviços de infra
+      # Conecta aos container_name do stack de infra
       - POSTGRES_HOST=onyx-postgres
       - VESPA_HOST=onyx-vespa
       - REDIS_HOST=onyx-redis
@@ -63,8 +65,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - api_server_logs:/var/log/onyx
-    networks:
-      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -98,7 +98,7 @@ services:
     restart: unless-stopped
     environment:
       - USE_LIGHTWEIGHT_BACKGROUND_WORKER=${USE_LIGHTWEIGHT_BACKGROUND_WORKER:-true}
-      # IMPORTANTE: Usar container_name dos serviços de infra
+      # Conecta aos container_name do stack de infra
       - POSTGRES_HOST=onyx-postgres
       - VESPA_HOST=onyx-vespa
       - REDIS_HOST=onyx-redis
@@ -113,8 +113,6 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - background_logs:/var/log/onyx
-    networks:
-      - onyx-network
     logging:
       driver: json-file
       options:
@@ -245,9 +243,4 @@ volumes:
   background_logs:
   inference_model_server_logs:
   indexing_model_server_logs:
-
-networks:
-  onyx-network:
-    external: true
-    name: onyx-network
 
