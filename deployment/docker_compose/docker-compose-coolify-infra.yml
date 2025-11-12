@@ -40,6 +40,8 @@ services:
     #   - "5432:5432"
     volumes:
       - db_volume:/var/lib/postgresql/data
+    networks:
+      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -67,6 +69,8 @@ services:
     #   - "8081:8081"
     volumes:
       - vespa_volume:/opt/vespa/var
+    networks:
+      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:19071/ApplicationStatus || exit 1"]
       interval: 15s
@@ -92,6 +96,8 @@ services:
     # IMPORTANTE: Não exponha portas em produção
     # ports:
     #   - "6379:6379"
+    networks:
+      - onyx-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -106,4 +112,9 @@ services:
 volumes:
   db_volume:
   vespa_volume:
+
+networks:
+  onyx-network:
+    name: onyx-network
+    driver: bridge
 
