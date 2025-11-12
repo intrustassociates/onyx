@@ -154,7 +154,6 @@ services:
       - "3000:3000"
     environment:
       - INTERNAL_URL=${INTERNAL_URL:-http://api_server:8080}
-      - OVERRIDE_API_PRODUCTION=${OVERRIDE_API_PRODUCTION:-true}
     networks:
       onyx-network:
         aliases:
