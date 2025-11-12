@@ -147,7 +147,7 @@ services:
         required: false
     depends_on:
       api_server:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     # COOLIFY: Porta exposta para o proxy reverso do Coolify
     ports:
