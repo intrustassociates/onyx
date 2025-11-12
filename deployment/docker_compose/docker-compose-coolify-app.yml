@@ -73,8 +73,8 @@ services:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 40s
+      retries: 6
+      start_period: 150s
     logging:
       driver: json-file
       options:
