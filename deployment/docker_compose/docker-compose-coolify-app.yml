@@ -66,7 +66,9 @@ services:
     volumes:
       - api_server_logs:/var/log/onyx
     networks:
-      - onyx-network
+      onyx-network:
+        aliases:
+          - api-server
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -116,7 +118,9 @@ services:
     volumes:
       - background_logs:/var/log/onyx
     networks:
-      - onyx-network
+      onyx-network:
+        aliases:
+          - background-worker
     logging:
       driver: json-file
       options:
@@ -151,7 +155,9 @@ services:
     environment:
       - INTERNAL_URL=${INTERNAL_URL:-http://api_server:8080}
     networks:
-      - onyx-network
+      onyx-network:
+        aliases:
+          - web-server
     logging:
       driver: json-file
       options:
