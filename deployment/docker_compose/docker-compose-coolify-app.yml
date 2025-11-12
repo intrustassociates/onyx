@@ -65,6 +65,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - api_server_logs:/var/log/onyx
+    networks:
+      - onyx-network
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -113,6 +115,8 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - background_logs:/var/log/onyx
+    networks:
+      - onyx-network
     logging:
       driver: json-file
       options:
@@ -243,4 +247,9 @@ volumes:
   background_logs:
   inference_model_server_logs:
   indexing_model_server_logs:
+
+networks:
+  onyx-network:
+    external: true
+    name: onyx-network
 
