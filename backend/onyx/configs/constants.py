@@ -177,6 +177,7 @@ class DocumentSource(str, Enum):
     SLAB = "slab"
     PRODUCTBOARD = "productboard"
     FILE = "file"
+    CODA = "coda"
     NOTION = "notion"
     ZULIP = "zulip"
     LINEAR = "linear"
@@ -211,6 +212,7 @@ class DocumentSource(str, Enum):
 
     IMAP = "imap"
     BITBUCKET = "bitbucket"
+    TESTRAIL = "testrail"
 
     # Special case just for integration tests
     MOCK_CONNECTOR = "mock_connector"
@@ -294,6 +296,15 @@ class MessageType(str, Enum):
     SYSTEM = "system"  # SystemMessage
     USER = "user"  # HumanMessage
     ASSISTANT = "assistant"  # AIMessage
+    TOOL_CALL = "tool_call"
+    TOOL_CALL_RESPONSE = "tool_call_response"
+
+
+class ChatMessageSimpleType(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL_CALL = "tool_call"
+    FILE_TEXT = "file_text"
 
 
 class TokenRateLimitScope(str, Enum):
@@ -321,7 +332,6 @@ class FileType(str, Enum):
 class MilestoneRecordType(str, Enum):
     TENANT_CREATED = "tenant_created"
     USER_SIGNED_UP = "user_signed_up"
-    MULTIPLE_USERS = "multiple_users"
     VISITED_ADMIN_PAGE = "visited_admin_page"
     CREATED_CONNECTOR = "created_connector"
     CONNECTOR_SUCCEEDED = "connector_succeeded"
@@ -553,7 +563,7 @@ REDIS_SOCKET_KEEPALIVE_OPTIONS[socket.TCP_KEEPCNT] = 3
 if platform.system() == "Darwin":
     REDIS_SOCKET_KEEPALIVE_OPTIONS[socket.TCP_KEEPALIVE] = 60  # type: ignore
 else:
-    REDIS_SOCKET_KEEPALIVE_OPTIONS[socket.TCP_KEEPIDLE] = 60  # type: ignore
+    REDIS_SOCKET_KEEPALIVE_OPTIONS[socket.TCP_KEEPIDLE] = 60
 
 
 class OnyxCallTypes(str, Enum):
@@ -586,6 +596,7 @@ DocumentSourceDescription: dict[DocumentSource, str] = {
     DocumentSource.SLAB: "slab data",
     DocumentSource.PRODUCTBOARD: "productboard data (boards, etc.)",
     DocumentSource.FILE: "files",
+    DocumentSource.CODA: "coda - team workspace with docs, tables, and pages",
     DocumentSource.NOTION: "notion data - a workspace that combines note-taking, \
 project management, and collaboration tools into a single, customizable platform",
     DocumentSource.ZULIP: "zulip data",
@@ -618,4 +629,5 @@ project management, and collaboration tools into a single, customizable platform
     DocumentSource.AIRTABLE: "airtable - database",
     DocumentSource.HIGHSPOT: "highspot - CRM data",
     DocumentSource.IMAP: "imap - email data",
+    DocumentSource.TESTRAIL: "testrail - test case management tool for QA processes",
 }

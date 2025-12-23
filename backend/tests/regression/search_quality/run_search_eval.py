@@ -13,10 +13,10 @@ from threading import Lock
 from threading import Semaphore
 from typing import cast
 
-import matplotlib.pyplot as plt  # type: ignore
+import matplotlib.pyplot as plt
 import requests
 from dotenv import load_dotenv
-from matplotlib.patches import Patch  # type: ignore
+from matplotlib.patches import Patch
 from pydantic import ValidationError
 from requests.exceptions import RequestException
 from retry import retry
@@ -37,8 +37,8 @@ load_dotenv(env_path)
 # pylint: disable=E402
 # flake8: noqa: E402
 
-from ee.onyx.server.query_and_chat.models import OneShotQARequest
-from ee.onyx.server.query_and_chat.models import OneShotQAResponse
+from onyx.server.query_and_chat.models import OneShotQARequest
+from onyx.server.query_and_chat.models import OneShotQAResponse
 from onyx.chat.models import ThreadMessage
 from onyx.configs.app_configs import POSTGRES_API_SERVER_POOL_OVERFLOW
 from onyx.configs.app_configs import POSTGRES_API_SERVER_POOL_SIZE
@@ -48,6 +48,7 @@ from onyx.configs.constants import MessageType
 from onyx.context.search.enums import OptionalSearchSetting
 from onyx.context.search.models import IndexFilters
 from onyx.context.search.models import RetrievalDetails
+from onyx.context.search.models import SavedSearchDoc
 from onyx.db.engine.sql_engine import get_session_with_tenant
 from onyx.db.engine.sql_engine import SqlEngine
 from onyx.utils.logger import setup_logger
@@ -462,7 +463,10 @@ class SearchAnswerAnalyzer:
 
             # extract documents from the QA response
             if result.docs:
-                top_documents = result.docs.top_documents
+                top_documents = [
+                    SavedSearchDoc.from_search_doc(doc)
+                    for doc in result.docs.top_documents
+                ]
                 return OneshotQAResult(
                     time_taken=time_taken,
                     top_documents=top_documents,

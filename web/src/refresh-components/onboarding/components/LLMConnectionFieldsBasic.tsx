@@ -1,9 +1,9 @@
-import React from "react";
 import { FormikField } from "@/refresh-components/form/FormikField";
 import { FormField } from "@/refresh-components/form/FormField";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import PasswordInputTypeIn from "@/refresh-components/inputs/PasswordInputTypeIn";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
+import InputComboBox from "@/refresh-components/inputs/InputComboBox";
 import InputSelect from "@/refresh-components/inputs/InputSelect";
 import { WellKnownLLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
 import InputFile from "@/refresh-components/inputs/InputFile";
@@ -12,12 +12,12 @@ import {
   BEDROCK_AUTH_FIELDS,
   HIDE_API_MESSAGE_FIELDS,
 } from "../constants";
-import SvgRefreshCw from "@/icons/refresh-cw";
 import IconButton from "@/refresh-components/buttons/IconButton";
-import SvgAlertCircle from "@/icons/alert-circle";
 import Text from "@/refresh-components/texts/Text";
+import { cn, noProp } from "@/lib/utils";
+import { SvgAlertCircle, SvgRefreshCw } from "@opal/icons";
 
-type Props = {
+export interface LLMConnectionFieldsBasicProps {
   llmDescriptor: WellKnownLLMProviderDescriptor;
   modalContent?: any;
   modelOptions: Array<{ label: string; value: string }>;
@@ -25,7 +25,6 @@ type Props = {
   apiStatus: "idle" | "loading" | "success" | "error";
   errorMessage: string;
   isFetchingModels: boolean;
-  onApiKeyBlur: (apiKey: string) => void;
   formikValues: any;
   setDefaultModelName: (value: string) => void;
   onFetchModels?: () => void;
@@ -33,14 +32,13 @@ type Props = {
   modelsApiStatus: "idle" | "loading" | "success" | "error";
   modelsErrorMessage: string;
   showModelsApiErrorMessage: boolean;
-  testModelChangeWithApiKey: (modelName: string) => Promise<void>;
   testFileInputChange: (
     customConfig: Record<string, any>
   ) => Promise<void> | void;
   disabled?: boolean;
-};
+}
 
-export const LLMConnectionFieldsBasic: React.FC<Props> = ({
+export default function LLMConnectionFieldsBasic({
   llmDescriptor,
   modalContent,
   modelOptions,
@@ -48,7 +46,6 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
   apiStatus,
   errorMessage,
   isFetchingModels,
-  onApiKeyBlur,
   formikValues,
   setDefaultModelName,
   onFetchModels,
@@ -56,16 +53,13 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
   modelsApiStatus,
   modelsErrorMessage,
   showModelsApiErrorMessage,
-  testModelChangeWithApiKey,
   testFileInputChange,
   disabled = false,
-}) => {
+}: LLMConnectionFieldsBasicProps) {
   const handleApiKeyInteraction = (apiKey: string) => {
     if (!apiKey) return;
     if (llmDescriptor?.name === "openrouter") {
       onFetchModels?.();
-    } else {
-      onApiKeyBlur(apiKey);
     }
   };
   return (
@@ -158,7 +152,7 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
                 <PasswordInputTypeIn
                   {...field}
                   placeholder=""
-                  isError={apiStatus === "error"}
+                  error={apiStatus === "error"}
                   onBlur={(e) => {
                     field.onBlur(e);
                     if (llmDescriptor?.name !== "azure") {
@@ -234,23 +228,28 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
                   <FormField.Control>
                     {customConfigKey.key_type === "select" ? (
                       <InputSelect
-                        name={field.name}
                         value={
                           (field.value as string) ??
                           (customConfigKey.default_value as string) ??
                           ""
                         }
                         onValueChange={(value) => helper.setValue(value)}
-                        onBlur={field.onBlur}
-                        options={
-                          customConfigKey.options?.map((opt) => ({
-                            label: opt.label,
-                            value: opt.value,
-                            description: opt?.description ?? undefined,
-                          })) ?? []
-                        }
                         disabled={disabled}
-                      />
+                      >
+                        <InputSelect.Trigger onBlur={field.onBlur} />
+
+                        <InputSelect.Content>
+                          {customConfigKey.options?.map((opt) => (
+                            <InputSelect.Item
+                              key={opt.value}
+                              value={opt.value}
+                              description={opt?.description ?? undefined}
+                            >
+                              {opt.label}
+                            </InputSelect.Item>
+                          ))}
+                        </InputSelect.Content>
+                      </InputSelect>
                     ) : customConfigKey.key_type === "file_input" ? (
                       <InputFile
                         placeholder={customConfigKey.default_value || ""}
@@ -258,7 +257,7 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
                         onValueSet={(value) =>
                           testFileInputChange({ [customConfigKey.name]: value })
                         }
-                        isError={apiStatus === "error"}
+                        error={apiStatus === "error"}
                         onBlur={(e) => {
                           field.onBlur(e);
                           if (field.value) {
@@ -276,7 +275,7 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
                         placeholder={customConfigKey.default_value || ""}
                         showClearButton={false}
                         disabled={disabled}
-                        isError={apiStatus === "error"}
+                        error={apiStatus === "error"}
                       />
                     ) : (
                       <InputTypeIn
@@ -284,7 +283,7 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
                         placeholder={customConfigKey.default_value || ""}
                         showClearButton={false}
                         disabled={disabled}
-                        isError={apiStatus === "error"}
+                        error={apiStatus === "error"}
                       />
                     )}
                   </FormField.Control>
@@ -355,71 +354,49 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
           <FormField name="default_model_name" state={state} className="w-full">
             <FormField.Label>Default Model</FormField.Label>
             <FormField.Control>
-              {modelOptions.length > 0 && (
-                <InputSelect
-                  name={field.name}
-                  value={field.value}
-                  onValueChange={(value) => {
-                    helper.setValue(value);
-                    setDefaultModelName(value);
-                    if (testModelChangeWithApiKey && value) {
-                      testModelChangeWithApiKey(value);
-                    }
-                  }}
-                  options={modelOptions}
-                  disabled={
-                    disabled || modelOptions.length === 0 || isFetchingModels
+              <InputComboBox
+                value={field.value}
+                onValueChange={(value) => {
+                  helper.setValue(value);
+                  setDefaultModelName(value);
+                }}
+                onChange={(e) => {
+                  helper.setValue(e.target.value);
+                  setDefaultModelName(e.target.value);
+                }}
+                options={modelOptions}
+                disabled={
+                  disabled || modelOptions.length === 0 || isFetchingModels
+                }
+                rightSection={
+                  canFetchModels ? (
+                    <IconButton
+                      internal
+                      icon={({ className }) => (
+                        <SvgRefreshCw
+                          className={cn(
+                            className,
+                            isFetchingModels && "animate-spin"
+                          )}
+                        />
+                      )}
+                      onClick={noProp((e) => {
+                        e.preventDefault();
+                        onFetchModels?.();
+                      })}
+                      tooltip="Fetch available models"
+                      disabled={disabled || isFetchingModels}
+                    />
+                  ) : undefined
+                }
+                onBlur={field.onBlur}
+                placeholder="Select a model"
+                onValidationError={(error) => {
+                  if (error) {
+                    helper.setError(error);
                   }
-                  rightSection={
-                    canFetchModels ? (
-                      <IconButton
-                        internal
-                        icon={SvgRefreshCw}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onFetchModels?.();
-                        }}
-                        tooltip="Fetch available models"
-                        disabled={disabled || isFetchingModels}
-                        className={isFetchingModels ? "animate-spin" : ""}
-                      />
-                    ) : undefined
-                  }
-                  onBlur={field.onBlur}
-                />
-              )}
-              {modelOptions.length === 0 && (
-                <InputTypeIn
-                  name={field.name}
-                  id={field.name}
-                  value={field.value}
-                  onChange={(e) => {
-                    helper.setValue(e.target.value);
-                    setDefaultModelName(e.target.value);
-                  }}
-                  placeholder="E.g. gpt-4"
-                  showClearButton={false}
-                  disabled={disabled}
-                  rightSection={
-                    canFetchModels ? (
-                      <IconButton
-                        internal
-                        icon={SvgRefreshCw}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          onFetchModels?.();
-                        }}
-                        tooltip="Fetch available models"
-                        disabled={disabled || isFetchingModels}
-                        className={isFetchingModels ? "animate-spin" : ""}
-                      />
-                    ) : undefined
-                  }
-                  onBlur={field.onBlur}
-                />
-              )}
+                }}
+              />
             </FormField.Control>
             {!showModelsApiErrorMessage && (
               <FormField.Message
@@ -444,4 +421,4 @@ export const LLMConnectionFieldsBasic: React.FC<Props> = ({
       />
     </>
   );
-};
+}

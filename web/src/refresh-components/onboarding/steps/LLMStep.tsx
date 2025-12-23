@@ -1,19 +1,17 @@
 import { memo, useState } from "react";
-import SvgCpu from "@/icons/cpu";
 import Text from "@/refresh-components/texts/Text";
 import Button from "@/refresh-components/buttons/Button";
-import SvgExternalLink from "@/icons/external-link";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
 import LLMProvider from "../components/LLMProvider";
 import { OnboardingActions, OnboardingState, OnboardingStep } from "../types";
 import { WellKnownLLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
-import { PROVIDER_ICON_MAP } from "../constants";
 import LLMConnectionModal, {
   LLMConnectionModalProps,
 } from "@/refresh-components/onboarding/components/LLMConnectionModal";
 import { cn } from "@/lib/utils";
-import SvgCheckCircle from "@/icons/check-circle";
 import { useCreateModal } from "@/refresh-components/contexts/ModalContext";
+import { ProviderIcon } from "@/app/admin/configuration/llm/ProviderIcon";
+import { SvgCheckCircle, SvgCpu, SvgExternalLink } from "@opal/icons";
 
 type LLMStepProps = {
   state: OnboardingState;
@@ -50,23 +48,18 @@ const StackedProviderIcons = ({ providers }: StackedProviderIconsProps) => {
 
   return (
     <div className="flex items-center">
-      {providers.slice(0, 3).map((provider, index) => {
-        const IconComponent = PROVIDER_ICON_MAP[provider];
-        if (!IconComponent) return null;
-
-        return (
-          <div
-            key={provider}
-            className="relative flex items-center justify-center w-6 h-6 rounded-04 bg-background-neutral-01 border border-border-01"
-            style={{
-              marginLeft: index > 0 ? "-8px" : "0",
-              zIndex: providers.length - index,
-            }}
-          >
-            <IconComponent className="w-4 h-4" />
-          </div>
-        );
-      })}
+      {providers.slice(0, 3).map((provider, index) => (
+        <div
+          key={provider}
+          className="relative flex items-center justify-center w-6 h-6 rounded-04 bg-background-neutral-01 border border-border-01"
+          style={{
+            marginLeft: index > 0 ? "-8px" : "0",
+            zIndex: providers.length - index,
+          }}
+        >
+          <ProviderIcon provider={provider} size={16} />
+        </div>
+      ))}
       {providers.length > 3 && (
         <div
           className="relative flex items-center justify-center w-6 h-6 rounded-04 bg-background-neutral-01 border border-border-01"
@@ -165,7 +158,7 @@ const LLMStepInner = ({
                     onboardingActions={onboardingActions}
                     title={llmDescriptor.title}
                     subtitle={llmDescriptor.display_name}
-                    icon={PROVIDER_ICON_MAP[llmDescriptor.name]}
+                    providerName={llmDescriptor.name}
                     llmDescriptor={llmDescriptor}
                     disabled={disabled}
                     isConnected={onboardingState.data.llmProviders?.some(

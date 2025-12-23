@@ -9,7 +9,7 @@ import {
   TextFormField,
 } from "@/components/Field";
 import { BrainIcon } from "@/components/icons/icons";
-import { Modal } from "@/components/Modal";
+import Modal from "@/refresh-components/Modal";
 import Button from "@/refresh-components/buttons/Button";
 import UnlabeledSwitchField from "@/refresh-components/formik-fields/UnlabeledSwitchField";
 import { Form, Formik, FormikState, useFormikContext } from "formik";
@@ -29,8 +29,8 @@ import { redirect } from "next/navigation";
 import { useIsKGExposed } from "@/app/admin/kg/utils";
 import KGEntityTypes from "@/app/admin/kg/KGEntityTypes";
 import Text from "@/refresh-components/texts/Text";
-import SvgSettings from "@/icons/settings";
 import { cn } from "@/lib/utils";
+import { SvgSettings } from "@opal/icons";
 
 function createDomainField(
   name: string,
@@ -294,20 +294,25 @@ function Main() {
         </>
       )}
       {configureModalShown && (
-        <Modal
-          title="Configure Knowledge Graph"
-          onOutsideClick={() => setConfigureModalShown(false)}
-          className="overflow-y-scroll"
-        >
-          <KGConfiguration
-            kgConfig={kgConfig}
-            setPopup={setPopup}
-            onSubmitSuccess={async () => {
-              await configMutate();
-              setConfigureModalShown(false);
-            }}
-            entityTypesMutate={entityTypesMutate}
-          />
+        <Modal open onOpenChange={() => setConfigureModalShown(false)}>
+          <Modal.Content medium>
+            <Modal.Header
+              icon={SvgSettings}
+              title="Configure Knowledge Graph"
+              onClose={() => setConfigureModalShown(false)}
+            />
+            <Modal.Body>
+              <KGConfiguration
+                kgConfig={kgConfig}
+                setPopup={setPopup}
+                onSubmitSuccess={async () => {
+                  await configMutate();
+                  setConfigureModalShown(false);
+                }}
+                entityTypesMutate={entityTypesMutate}
+              />
+            </Modal.Body>
+          </Modal.Content>
         </Modal>
       )}
     </div>
@@ -326,7 +331,7 @@ export default function Page() {
   }
 
   return (
-    <div className="mx-auto container">
+    <div className="container">
       <AdminPageTitle
         title="Knowledge Graph"
         icon={<BrainIcon size={32} className="my-auto" />}

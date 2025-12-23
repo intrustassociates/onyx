@@ -24,6 +24,12 @@ APP_PORT = 8080
 # prefix from requests directed towards the API server. In these cases, set this to `/api`
 APP_API_PREFIX = os.environ.get("API_PREFIX", "")
 
+# Whether to send user metadata (user_id/email and session_id) to the LLM provider.
+# Disabled by default.
+SEND_USER_METADATA_TO_LLM_PROVIDER = (
+    os.environ.get("SEND_USER_METADATA_TO_LLM_PROVIDER", "")
+).lower() == "true"
+
 #####
 # User Facing Features Configs
 #####
@@ -31,7 +37,6 @@ BLURB_SIZE = 128  # Number Encoder Tokens included in the chunk blurb
 GENERATIVE_MODEL_ACCESS_CHECK_FREQ = int(
     os.environ.get("GENERATIVE_MODEL_ACCESS_CHECK_FREQ") or 86400
 )  # 1 day
-DISABLE_GENERATIVE_AI = os.environ.get("DISABLE_GENERATIVE_AI", "").lower() == "true"
 
 # Controls whether users can use User Knowledge (personal documents) in assistants
 DISABLE_USER_KNOWLEDGE = os.environ.get("DISABLE_USER_KNOWLEDGE", "").lower() == "true"
@@ -528,6 +533,10 @@ CONFLUENCE_TIMEZONE_OFFSET = float(
     os.environ.get("CONFLUENCE_TIMEZONE_OFFSET", get_current_tz_offset())
 )
 
+CONFLUENCE_USE_ONYX_USERS_FOR_GROUP_SYNC = (
+    os.environ.get("CONFLUENCE_USE_ONYX_USERS_FOR_GROUP_SYNC", "").lower() == "true"
+)
+
 GOOGLE_DRIVE_CONNECTOR_SIZE_THRESHOLD = int(
     os.environ.get("GOOGLE_DRIVE_CONNECTOR_SIZE_THRESHOLD", 10 * 1024 * 1024)
 )
@@ -574,12 +583,28 @@ LINEAR_CLIENT_SECRET = os.getenv("LINEAR_CLIENT_SECRET")
 SLACK_NUM_THREADS = int(os.getenv("SLACK_NUM_THREADS") or 8)
 MAX_SLACK_QUERY_EXPANSIONS = int(os.environ.get("MAX_SLACK_QUERY_EXPANSIONS", "5"))
 
+# Slack federated search thread context settings
+# Batch size for fetching thread context (controls concurrent API calls per batch)
+SLACK_THREAD_CONTEXT_BATCH_SIZE = int(
+    os.environ.get("SLACK_THREAD_CONTEXT_BATCH_SIZE", "5")
+)
+# Maximum messages to fetch thread context for (top N by relevance get full context)
+MAX_SLACK_THREAD_CONTEXT_MESSAGES = int(
+    os.environ.get("MAX_SLACK_THREAD_CONTEXT_MESSAGES", "5")
+)
+
 DASK_JOB_CLIENT_ENABLED = (
     os.environ.get("DASK_JOB_CLIENT_ENABLED", "").lower() == "true"
 )
 EXPERIMENTAL_CHECKPOINTING_ENABLED = (
     os.environ.get("EXPERIMENTAL_CHECKPOINTING_ENABLED", "").lower() == "true"
 )
+
+
+# TestRail specific configs
+TESTRAIL_BASE_URL = os.environ.get("TESTRAIL_BASE_URL", "")
+TESTRAIL_USERNAME = os.environ.get("TESTRAIL_USERNAME", "")
+TESTRAIL_API_KEY = os.environ.get("TESTRAIL_API_KEY", "")
 
 LEAVE_CONNECTOR_ACTIVE_ON_INITIALIZATION_FAILURE = (
     os.environ.get("LEAVE_CONNECTOR_ACTIVE_ON_INITIALIZATION_FAILURE", "").lower()
@@ -683,10 +708,29 @@ AVERAGE_SUMMARY_EMBEDDINGS = (
 
 MAX_TOKENS_FOR_FULL_INCLUSION = 4096
 
+# The intent was to have this be configurable per query, but I don't think any
+# codepath was actually configuring this, so for the migrated Vespa interface
+# we'll just use the default value, but also have it be configurable by env var.
+RECENCY_BIAS_MULTIPLIER = float(os.environ.get("RECENCY_BIAS_MULTIPLIER") or 1.0)
+
+# Should match the rerank-count value set in
+# backend/onyx/document_index/vespa/app_config/schemas/danswer_chunk.sd.jinja.
+RERANK_COUNT = int(os.environ.get("RERANK_COUNT") or 1000)
+
 
 #####
 # Tool Configs
 #####
+# Code Interpreter Service Configuration
+CODE_INTERPRETER_BASE_URL = os.environ.get("CODE_INTERPRETER_BASE_URL")
+
+CODE_INTERPRETER_DEFAULT_TIMEOUT_MS = int(
+    os.environ.get("CODE_INTERPRETER_DEFAULT_TIMEOUT_MS") or 60_000
+)
+
+CODE_INTERPRETER_MAX_OUTPUT_LENGTH = int(
+    os.environ.get("CODE_INTERPRETER_MAX_OUTPUT_LENGTH") or 50_000
+)
 
 
 #####
@@ -738,8 +782,6 @@ BRAINTRUST_MAX_CONCURRENCY = int(os.environ.get("BRAINTRUST_MAX_CONCURRENCY") or
 # Langfuse API credentials - if provided, Langfuse tracing will be enabled
 LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY") or ""
 LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY") or ""
-# Langfuse host URL (defaults to cloud instance)
-LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST") or "https://cloud.langfuse.com"
 
 TOKEN_BUDGET_GLOBALLY_ENABLED = (
     os.environ.get("TOKEN_BUDGET_GLOBALLY_ENABLED", "").lower() == "true"
@@ -855,6 +897,21 @@ _API_KEY_HASH_ROUNDS_RAW = os.environ.get("API_KEY_HASH_ROUNDS")
 API_KEY_HASH_ROUNDS = (
     int(_API_KEY_HASH_ROUNDS_RAW) if _API_KEY_HASH_ROUNDS_RAW else None
 )
+
+#####
+# MCP Server Configs
+#####
+MCP_SERVER_ENABLED = os.environ.get("MCP_SERVER_ENABLED", "").lower() == "true"
+MCP_SERVER_PORT = int(os.environ.get("MCP_SERVER_PORT") or 8090)
+
+# CORS origins for MCP clients (comma-separated)
+# Local dev: "http://localhost:*"
+# Production: "https://trusted-client.com,https://another-client.com"
+MCP_SERVER_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("MCP_SERVER_CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 
 POD_NAME = os.environ.get("POD_NAME")

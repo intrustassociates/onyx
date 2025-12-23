@@ -1,23 +1,25 @@
 import React, { memo, useCallback, useState } from "react";
 import Text from "@/refresh-components/texts/Text";
-import { SvgProps } from "@/icons";
-import SvgArrowExchange from "@/icons/arrow-exchange";
 import Truncated from "@/refresh-components/texts/Truncated";
-import SvgServer from "@/icons/server";
 import LLMConnectionIcons from "@/refresh-components/onboarding/components/LLMConnectionIcons";
 import { WellKnownLLMProviderDescriptor } from "@/app/admin/configuration/llm/interfaces";
-import SvgSettings from "@/icons/settings";
 import IconButton from "@/refresh-components/buttons/IconButton";
-import SvgCheckCircle from "@/icons/check-circle";
 import { OnboardingActions, OnboardingState } from "../types";
 import { cn, noProp } from "@/lib/utils";
 import { LLMConnectionModalProps } from "./LLMConnectionModal";
 import { ModalCreationInterface } from "@/refresh-components/contexts/ModalContext";
+import {
+  SvgArrowExchange,
+  SvgCheckCircle,
+  SvgServer,
+  SvgSettings,
+} from "@opal/icons";
+import { ProviderIcon } from "@/app/admin/configuration/llm/ProviderIcon";
 
 export interface LLMProviderProps {
   title: string;
   subtitle: string;
-  icon?: React.FunctionComponent<SvgProps>;
+  providerName?: string;
   llmDescriptor?: WellKnownLLMProviderDescriptor;
   disabled?: boolean;
   isConnected?: boolean;
@@ -31,7 +33,7 @@ export interface LLMProviderProps {
 function LLMProviderInner({
   title,
   subtitle,
-  icon: Icon,
+  providerName,
   llmDescriptor,
   disabled,
   isConnected,
@@ -51,8 +53,8 @@ function LLMProviderInner({
     }
 
     // If not connected, open the modal
-    const iconNode = Icon ? (
-      <Icon className="w-6 h-6" />
+    const iconNode = providerName ? (
+      <ProviderIcon provider={providerName} size={24} />
     ) : (
       <SvgServer className="w-6 h-6 stroke-text-04" />
     );
@@ -70,7 +72,7 @@ function LLMProviderInner({
       onOpenModal();
     }
   }, [
-    Icon,
+    providerName,
     llmDescriptor,
     title,
     onboardingState,
@@ -87,12 +89,19 @@ function LLMProviderInner({
   );
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
       onClick={handleCardClick}
+      onKeyDown={(e) => {
+        if (!disabled && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          handleCardClick();
+        }
+      }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      disabled={disabled}
+      aria-disabled={disabled}
       className={cn(
         "flex justify-between h-full w-full p-1 rounded-12 border border-border-01 bg-background-neutral-01 transition-colors text-left",
         !disabled && "hover:bg-background-neutral-02 cursor-pointer",
@@ -101,8 +110,8 @@ function LLMProviderInner({
     >
       <div className="flex items-center gap-1 p-1 flex-1 min-w-0">
         <div className="flex items-start h-full pt-0.5">
-          {Icon ? (
-            <Icon className="w-4 h-4" />
+          {providerName ? (
+            <ProviderIcon provider={providerName} size={16} className="" />
           ) : (
             <SvgServer className="w-4 h-4 stroke-text-04" />
           )}
@@ -143,7 +152,7 @@ function LLMProviderInner({
           </div>
         </div>
       )}
-    </button>
+    </div>
   );
 }
 

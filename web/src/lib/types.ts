@@ -464,6 +464,7 @@ export enum ValidSources {
   Jira = "jira",
   Productboard = "productboard",
   Slab = "slab",
+  Coda = "coda",
   Notion = "notion",
   Guru = "guru",
   Gong = "gong",
@@ -502,6 +503,7 @@ export enum ValidSources {
   Highspot = "highspot",
   Imap = "imap",
   Bitbucket = "bitbucket",
+  TestRail = "testrail",
 
   // Federated Connectors
   FederatedSlack = "federated_slack",
@@ -525,6 +527,7 @@ export const validAutoSyncSources = [
   ValidSources.Salesforce,
   ValidSources.GitHub,
   ValidSources.Sharepoint,
+  ValidSources.Teams,
 ] as const;
 
 // Create a type from the array elements

@@ -4,12 +4,10 @@ import React, { useMemo } from "react";
 import type { ProjectFile } from "@/app/chat/projects/projectsService";
 import { UserFileStatus } from "@/app/chat/projects/projectsService";
 import Text from "@/refresh-components/texts/Text";
-import SvgFileText from "@/icons/file-text";
 import Truncated from "@/refresh-components/texts/Truncated";
 import { cn, isImageFile } from "@/lib/utils";
 import SimpleLoader from "@/refresh-components/loaders/SimpleLoader";
-import SvgX from "@/icons/x";
-
+import { SvgFileText, SvgX } from "@opal/icons";
 function ImageFileCard({
   file,
   imageUrl,
@@ -168,7 +166,7 @@ export function FileCard({
     <div
       className={`relative group flex items-center gap-3 border border-border-01 rounded-12 ${
         isProcessing ? "bg-background-neutral-02" : "bg-background-tint-00"
-      } p-1 h-14 w-40 ${
+      } p-1 h-14 w-40 pl-2 ${
         onFileClick && !isProcessing
           ? "cursor-pointer hover:bg-accent-background"
           : ""
@@ -218,3 +216,8 @@ export function FileCard({
     </div>
   );
 }
+
+// Skeleton loading component for file cards
+export const FileCardSkeleton = () => (
+  <div className="w-40 h-14 rounded-12 bg-background-tint-02 animate-pulse" />
+);

@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import Text from "@/components/ui/text";
 import Title from "@/components/ui/title";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
 import { DocumentSetSummary } from "@/lib/types";
 import { useState } from "react";
 import { useDocumentSets } from "./hooks";
@@ -429,7 +429,7 @@ const Main = () => {
 
 const Page = () => {
   return (
-    <div className="container mx-auto">
+    <div className="container">
       <AdminPageTitle icon={<BookmarkIcon size={32} />} title="Document Sets" />
 
       <Main />

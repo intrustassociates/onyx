@@ -121,6 +121,10 @@ export interface SlabCredentialJson {
   slab_bot_token: string;
 }
 
+export interface CodaCredentialJson {
+  coda_bearer_token: string;
+}
+
 export interface NotionCredentialJson {
   notion_integration_token: string;
 }
@@ -267,6 +271,12 @@ export interface ImapCredentialJson {
   imap_password: string;
 }
 
+export interface TestRailCredentialJson {
+  testrail_base_url: string;
+  testrail_username: string;
+  testrail_api_key: string;
+}
+
 export const credentialTemplates: Record<ValidSources, any> = {
   github: { github_access_token: "" } as GithubCredentialJson,
   gitlab: {
@@ -297,6 +307,7 @@ export const credentialTemplates: Record<ValidSources, any> = {
   } as JiraCredentialJson,
   productboard: { productboard_access_token: "" } as ProductboardCredentialJson,
   slab: { slab_bot_token: "" } as SlabCredentialJson,
+  coda: { coda_bearer_token: "" } as CodaCredentialJson,
   notion: { notion_integration_token: "" } as NotionCredentialJson,
   guru: { guru_user: "", guru_user_token: "" } as GuruCredentialJson,
   gong: {
@@ -464,6 +475,11 @@ export const credentialTemplates: Record<ValidSources, any> = {
     imap_username: "",
     imap_password: "",
   } as ImapCredentialJson,
+  testrail: {
+    testrail_base_url: "",
+    testrail_username: "",
+    testrail_api_key: "",
+  } as TestRailCredentialJson,
 };
 
 export const credentialDisplayNames: Record<string, string> = {
@@ -508,6 +524,9 @@ export const credentialDisplayNames: Record<string, string> = {
 
   // Slab
   slab_bot_token: "Slab Bot Token",
+
+  // Coda
+  coda_bearer_token: "Coda Bearer Token",
 
   // Notion
   notion_integration_token: "Notion Integration Token",
@@ -557,6 +576,11 @@ export const credentialDisplayNames: Record<string, string> = {
   // IMAP
   imap_username: "IMAP Username",
   imap_password: "IMAP Password",
+
+  // TestRail
+  testrail_base_url: "TestRail Base URL (e.g. https://yourcompany.testrail.io)",
+  testrail_username: "TestRail Username or Email",
+  testrail_api_key: "TestRail API Key",
 
   // S3
   aws_access_key_id: "AWS Access Key ID",

@@ -9,6 +9,7 @@ import {
 import { StreamStopInfo } from "@/lib/search/interfaces";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Route } from "next";
 import { usePostHog } from "posthog-js/react";
 import { stopChatSession } from "../chat_search/utils";
 import {
@@ -58,20 +59,16 @@ import {
   useRouter,
   useSearchParams,
 } from "next/navigation";
-import { useChatContext } from "@/refresh-components/contexts/ChatContext";
+import useChatSessions from "@/hooks/useChatSessions";
 import {
   useChatSessionStore,
   useCurrentMessageTree,
   useCurrentChatState,
   useCurrentMessageHistory,
 } from "../stores/useChatSessionStore";
-import {
-  Packet,
-  CitationDelta,
-  MessageStart,
-  PacketType,
-} from "../services/streamingModels";
-import { useAgentsContext } from "@/refresh-components/contexts/AgentsContext";
+import { Packet, MessageStart, PacketType } from "../services/streamingModels";
+import { useAssistantPreferences } from "@/app/chat/hooks/useAssistantPreferences";
+import { useForcedTools } from "@/lib/hooks/useForcedTools";
 import { ProjectFile, useProjectsContext } from "../projects/ProjectsContext";
 import { useAppParams } from "@/hooks/appNavigation";
 import { projectFilesToFileDescriptors } from "../services/fileUtils";
@@ -93,7 +90,6 @@ export interface OnSubmitProps {
   isSeededChat?: boolean;
   modelOverride?: LlmDescriptor;
   regenerationRequest?: RegenerationRequest | null;
-  overrideFileDescriptors?: FileDescriptor[];
 }
 
 interface RegenerationRequest {
@@ -111,10 +107,6 @@ interface UseChatControllerProps {
   selectedDocuments: OnyxDocument[];
   searchParams: ReadonlyURLSearchParams;
   setPopup: (popup: PopupSpec) => void;
-
-  // scroll/focus related stuff
-  clientScrollToBottom: (fast?: boolean) => void;
-
   resetInputBar: () => void;
   setSelectedAssistantFromId: (assistantId: number | null) => void;
 }
@@ -126,10 +118,6 @@ export function useChatController({
   liveAssistant,
   existingChatSessionId,
   selectedDocuments,
-
-  // scroll/focus related stuff
-  clientScrollToBottom,
-
   setPopup,
   resetInputBar,
   setSelectedAssistantFromId,
@@ -138,9 +126,9 @@ export function useChatController({
   const router = useRouter();
   const searchParams = useSearchParams();
   const params = useAppParams();
-  const { refreshChatSessions } = useChatContext();
-  const { agentPreferences: assistantPreferences, forcedToolIds } =
-    useAgentsContext();
+  const { refreshChatSessions } = useChatSessions();
+  const { assistantPreferences } = useAssistantPreferences();
+  const { forcedToolIds } = useForcedTools();
   const { fetchProjects, uploadFiles, setCurrentMessageFiles, beginUpload } =
     useProjectsContext();
   const posthog = usePostHog();
@@ -249,7 +237,7 @@ export function useChatController({
 
     // Navigate immediately if still on chat page
     if (pathname === "/chat" && !navigatingAway.current) {
-      router.push(newUrl, { scroll: false });
+      router.push(newUrl as Route, { scroll: false });
     }
 
     // Refresh sidebar so chat appears (will show as "New Chat" initially)
@@ -288,15 +276,15 @@ export function useChatController({
 
   const upsertToCompleteMessageTree = ({
     messages,
-    completeMessageTreeOverride,
     chatSessionId,
+    completeMessageTreeOverride,
     makeLatestChildMessage = false,
   }: {
     messages: Message[];
+    chatSessionId: string;
     // if calling this function repeatedly with short delay, stay may not update in time
     // and result in weird behavipr
     completeMessageTreeOverride?: MessageTreeState | null;
-    chatSessionId?: string;
     oldIds?: number[] | null;
     makeLatestChildMessage?: boolean;
   }) => {
@@ -313,13 +301,9 @@ export function useChatController({
       makeLatestChildMessage
     );
 
-    const sessionId = chatSessionId || getCurrentSessionId();
-    updateSessionMessageTree(sessionId, newCompleteMessageTree);
+    updateSessionMessageTree(chatSessionId, newCompleteMessageTree);
 
-    return {
-      sessionId,
-      messageTree: newCompleteMessageTree,
-    };
+    return newCompleteMessageTree;
   };
 
   const stopGenerating = useCallback(async () => {
@@ -364,10 +348,12 @@ export function useChatController({
         const packets = lastMessage.packets || [];
         const hasStop = packets.some((p) => p.obj.type === PacketType.STOP);
         if (!hasStop) {
-          const maxInd =
-            packets.length > 0 ? Math.max(...packets.map((p) => p.ind)) : 0;
+          const maxTurnIndex =
+            packets.length > 0
+              ? Math.max(...packets.map((p) => p.placement.turn_index))
+              : 0;
           const stopPacket: Packet = {
-            ind: maxInd + 1,
+            placement: { turn_index: maxTurnIndex + 1 },
             obj: { type: PacketType.STOP },
           } as Packet;
 
@@ -396,7 +382,6 @@ export function useChatController({
       isSeededChat,
       modelOverride,
       regenerationRequest,
-      overrideFileDescriptors,
     }: OnSubmitProps) => {
       const projectId = params(SEARCH_PARAM_NAMES.PROJECT_ID);
       {
@@ -406,7 +391,7 @@ export function useChatController({
           const newUrl = params.toString()
             ? `${pathname}?${params.toString()}`
             : pathname;
-          router.replace(newUrl, { scroll: false });
+          router.replace(newUrl as Route, { scroll: false });
         }
       }
 
@@ -492,8 +477,6 @@ export function useChatController({
 
         return;
       }
-
-      clientScrollToBottom();
 
       let currChatSessionId: string;
       const isNewSession = existingChatSessionId === null;
@@ -623,13 +606,12 @@ export function useChatController({
       const messagesToUpsert = regenerationRequest
         ? [initialAssistantNode] // Only upsert the new assistant for regeneration
         : [initialUserNode, initialAssistantNode]; // Upsert both for normal/edit flow
-      const newMessageDetails = upsertToCompleteMessageTree({
+      currentMessageTreeLocal = upsertToCompleteMessageTree({
         messages: messagesToUpsert,
         completeMessageTreeOverride: currentMessageTreeLocal,
         chatSessionId: frozenSessionId,
       });
       resetInputBar();
-      currentMessageTreeLocal = newMessageDetails.messageTree;
 
       let answer = "";
 
@@ -644,6 +626,9 @@ export function useChatController({
       let aiMessageImages: FileDescriptor[] | null = null;
       let error: string | null = null;
       let stackTrace: string | null = null;
+      let errorCode: string | null = null;
+      let isRetryable: boolean = true;
+      let errorDetails: Record<string, any> | null = null;
 
       let finalMessage: BackendMessage | null = null;
       let toolCall: ToolCallMetadata | null = null;
@@ -666,7 +651,7 @@ export function useChatController({
           signal: controller.signal,
           message: currMessage,
           alternateAssistantId: liveAssistant?.id,
-          fileDescriptors: overrideFileDescriptors,
+          fileDescriptors: projectFilesToFileDescriptors(currentMessageFiles),
           parentMessageId: (() => {
             const parentId =
               regenerationRequest?.parentMessage.messageId ||
@@ -775,14 +760,18 @@ export function useChatController({
               Object.hasOwn(packet, "error") &&
               (packet as any).error != null
             ) {
-              setUncaughtError(
-                frozenSessionId,
-                (packet as StreamingError).error
-              );
+              const streamingError = packet as StreamingError;
+              error = streamingError.error;
+              stackTrace = streamingError.stack_trace || null;
+              errorCode = streamingError.error_code || null;
+              isRetryable = streamingError.is_retryable ?? true;
+              errorDetails = streamingError.details || null;
+
+              setUncaughtError(frozenSessionId, streamingError.error);
               updateChatStateAction(frozenSessionId, "input");
               updateSubmittedMessage(getCurrentSessionId(), "");
 
-              throw new Error((packet as StreamingError).error);
+              throw new Error(streamingError.error);
             } else if (Object.hasOwn(packet, "message_id")) {
               finalMessage = packet as BackendMessage;
             } else if (Object.hasOwn(packet, "stop_reason")) {
@@ -797,16 +786,18 @@ export function useChatController({
               // Check if the packet contains document information
               const packetObj = (packet as Packet).obj;
 
-              if (packetObj.type === "citation_delta") {
-                const citationDelta = packetObj as CitationDelta;
-                if (citationDelta.citations) {
-                  citations = Object.fromEntries(
-                    citationDelta.citations.map((c) => [
-                      c.document_id,
-                      c.citation_num,
-                    ])
-                  );
-                }
+              if (packetObj.type === "citation_info") {
+                // Individual citation packet from backend streaming
+                const citationInfo = packetObj as {
+                  type: "citation_info";
+                  citation_number: number;
+                  document_id: string;
+                };
+                // Incrementally build citations map
+                citations = {
+                  ...(citations || {}),
+                  [citationInfo.citation_number]: citationInfo.document_id,
+                };
               } else if (packetObj.type === "message_start") {
                 const messageStart = packetObj as MessageStart;
                 if (messageStart.final_documents) {
@@ -826,7 +817,7 @@ export function useChatController({
             parentMessage =
               parentMessage || currentMessageTreeLocal?.get(SYSTEM_NODE_ID)!;
 
-            const newMessageDetails = upsertToCompleteMessageTree({
+            currentMessageTreeLocal = upsertToCompleteMessageTree({
               messages: [
                 {
                   ...initialUserNode,
@@ -854,13 +845,12 @@ export function useChatController({
               completeMessageTreeOverride: currentMessageTreeLocal,
               chatSessionId: frozenSessionId!,
             });
-            currentMessageTreeLocal = newMessageDetails.messageTree;
           }
         }
       } catch (e: any) {
         console.log("Error:", e);
         const errorMsg = e.message;
-        const newMessageDetails = upsertToCompleteMessageTree({
+        currentMessageTreeLocal = upsertToCompleteMessageTree({
           messages: [
             {
               nodeId: initialUserNode.nodeId,
@@ -884,11 +874,15 @@ export function useChatController({
               toolCall: null,
               parentNodeId: initialUserNode.nodeId,
               packets: [],
+              stackTrace: stackTrace,
+              errorCode: errorCode,
+              isRetryable: isRetryable,
+              errorDetails: errorDetails,
             },
           ],
           completeMessageTreeOverride: currentMessageTreeLocal,
+          chatSessionId: frozenSessionId,
         });
-        currentMessageTreeLocal = newMessageDetails.messageTree;
       }
 
       resetRegenerationState(frozenSessionId);
@@ -914,7 +908,6 @@ export function useChatController({
       selectedDocuments,
       searchParams,
       setPopup,
-      clientScrollToBottom,
       resetInputBar,
       setSelectedAssistantFromId,
       updateSelectedNodeForDocDisplay,
@@ -1031,6 +1024,8 @@ export function useChatController({
 
   // fetch # of allowed document tokens for the selected Persona
   useEffect(() => {
+    if (!liveAssistant?.id) return; // avoid calling with undefined persona id
+
     async function fetchMaxTokens() {
       const response = await fetch(
         `/api/chat/max-selected-document-tokens?persona_id=${liveAssistant?.id}`

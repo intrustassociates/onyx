@@ -1,6 +1,5 @@
 "use client";
 import { AdminPageTitle } from "@/components/admin/Title";
-import { ConnectorIcon } from "@/components/icons/icons";
 import { SourceCategory, SourceMetadata } from "@/lib/search/interfaces";
 import { listSourceMetadata } from "@/lib/sources";
 import Button from "@/refresh-components/buttons/Button";
@@ -33,7 +32,7 @@ import { SettingsContext } from "@/components/settings/SettingsProvider";
 import SourceTile from "@/components/SourceTile";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import Text from "@/refresh-components/texts/Text";
-
+import { SvgUploadCloud } from "@opal/icons";
 function SourceTileTooltipWrapper({
   sourceMetadata,
   preSelect,
@@ -268,9 +267,9 @@ export default function Page() {
   };
 
   return (
-    <div className="mx-auto container">
+    <div className="container">
       <AdminPageTitle
-        icon={<ConnectorIcon size={32} />}
+        icon={SvgUploadCloud}
         title="Add Connector"
         farRightElement={
           <Button href="/admin/indexing/status" primary>

@@ -1,9 +1,14 @@
+const plugin = require("tailwindcss/plugin");
+
 /** @type {import('tailwindcss').Config} */
 
 module.exports = {
   darkMode: "class",
   content: ["./src/**/*.{js,jsx,ts,tsx}", "./lib/opal/**/*.{js,jsx,ts,tsx}"],
   theme: {
+    container: {
+      center: true,
+    },
     transparent: "transparent",
     current: "currentColor",
     extend: {
@@ -195,6 +200,10 @@ module.exports = {
         "code-number": "var(--code-number)",
         "code-definition": "var(--code-definition)",
 
+        // Shimmer colors for loading animations
+        "shimmer-base": "var(--shimmer-base)",
+        "shimmer-highlight": "var(--shimmer-highlight)",
+
         // Tailwind defaults
         background: "var(--background-tint-01)",
         foreground: "var(--background-tint-inverted-01)",
@@ -293,5 +302,8 @@ module.exports = {
     require("@tailwindcss/typography"),
     require("@headlessui/tailwindcss"),
     require("tailwindcss-animate"),
+    plugin(({ addVariant }) => {
+      addVariant("focus-within-nonactive", "&:focus-within:not(:active)");
+    }),
   ],
 };

@@ -10,7 +10,14 @@ import {
   createToolGroups,
   createMockChatState,
   renderMultiToolRenderer,
+  createInternalSearchToolGroup,
 } from "@tests/setup/multiToolTestHelpers";
+
+// The search tool renderers use ResultIcon, which pulls in complex source metadata.
+// For these tests we only care about statuses/text, so mock it to avoid heavy deps.
+jest.mock("@/components/chat/sources/SourceCard", () => ({
+  ResultIcon: () => <div data-testid="result-icon" />,
+}));
 
 // Mock the RendererComponent to return predictable, simple output
 jest.mock("./renderMessageComponent", () => ({
@@ -82,6 +89,49 @@ describe("MultiToolRenderer - Complete Mode", () => {
     // Wait for Done node
     await waitFor(() => {
       expect(screen.getByText("Done")).toBeInTheDocument();
+    });
+  });
+
+  test("internal search tool is split into two steps in summary", () => {
+    const searchGroup = createInternalSearchToolGroup(0);
+
+    render(
+      <MultiToolRenderer
+        packetGroups={[searchGroup]}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={false}
+        stopPacketSeen={true}
+      />
+    );
+
+    // One internal search tool becomes two logical steps
+    expect(screen.getByText("2 steps")).toBeInTheDocument();
+  });
+
+  test("internal search tool shows separate Searching and Reading steps when expanded", async () => {
+    const user = setupUser();
+
+    const searchGroup = createInternalSearchToolGroup(0);
+
+    render(
+      <MultiToolRenderer
+        packetGroups={[searchGroup]}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Summary should reflect two steps
+    await user.click(screen.getByText("2 steps"));
+
+    await waitFor(() => {
+      // Step 1 status from SearchToolStep1Renderer
+      expect(screen.getByText("Searching internally")).toBeInTheDocument();
+      // Step 2 status from SearchToolStep2Renderer
+      expect(screen.getByText("Reading")).toBeInTheDocument();
     });
   });
 
@@ -346,7 +396,11 @@ describe("MultiToolRenderer - Edge Cases", () => {
   });
 
   test("handles empty packet groups gracefully", () => {
-    const emptyGroups: { ind: number; packets: any[] }[] = [];
+    const emptyGroups: {
+      turn_index: number;
+      tab_index: number;
+      packets: any[];
+    }[] = [];
 
     const { container } = render(
       <MultiToolRenderer
@@ -389,5 +443,450 @@ describe("MultiToolRenderer - Accessibility", () => {
 
     // Summary text should be present
     expect(screen.getByText("3 steps")).toBeInTheDocument();
+  });
+});
+
+describe("MultiToolRenderer - Parallel Tools", () => {
+  test("renders parallel tools as tabs when multiple tools share same turn_index", () => {
+    // Create parallel tools: internal search and web search at same turn_index
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: {
+              type: "search_tool_start",
+              is_internet_search: false,
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: {
+              type: "search_tool_queries_delta",
+              queries: ["test query"],
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: {
+              type: "search_tool_documents_delta",
+              documents: [
+                { document_id: "doc-1", semantic_identifier: "Doc 1" },
+              ],
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: {
+              type: "section_end",
+            },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: {
+              type: "search_tool_start",
+              is_internet_search: true,
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: {
+              type: "search_tool_queries_delta",
+              queries: ["web query"],
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: {
+              type: "search_tool_documents_delta",
+              documents: [
+                { document_id: "doc-2", semantic_identifier: "Doc 2" },
+              ],
+            },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: {
+              type: "section_end",
+            },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Should show both tools as tabs
+    expect(screen.getByText("Internal Search")).toBeInTheDocument();
+    expect(screen.getByText("Web Search")).toBeInTheDocument();
+  });
+
+  test("shows navigation arrows for parallel tools", () => {
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_start", is_internet_search: false },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "search_tool_start", is_internet_search: true },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Should have navigation arrows
+    const chevronLeftButtons = container.querySelectorAll("svg.w-4.h-4");
+    expect(chevronLeftButtons.length).toBeGreaterThan(0);
+  });
+
+  test("allows switching between tabs", async () => {
+    const user = setupUser();
+
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_start", is_internet_search: false },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "search_tool_start", is_internet_search: true },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+    ];
+
+    render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Click on Web Search tab
+    await user.click(screen.getByText("Web Search"));
+
+    // Web Search tab should now be active (has different styling)
+    const webSearchButton = screen.getByText("Web Search").closest("button");
+    expect(webSearchButton).toHaveClass("bg-neutral-800");
+  });
+
+  test("shows expand/collapse button for parallel tools", async () => {
+    const user = setupUser();
+
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_start", is_internet_search: false },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_queries_delta", queries: ["test"] },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "search_tool_start", is_internet_search: true },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Should have expand/collapse toggle
+    const toggleButtons = container.querySelectorAll("button");
+    expect(toggleButtons.length).toBeGreaterThan(0);
+  });
+
+  test("arrow buttons navigate between tabs", async () => {
+    const user = setupUser();
+
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_start", is_internet_search: false },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "search_tool_start", is_internet_search: true },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // Initially, Internal Search should be active
+    const internalSearchButton = screen
+      .getByText("Internal Search")
+      .closest("button");
+    expect(internalSearchButton).toHaveClass("bg-neutral-800");
+
+    // Find the next tab button (right arrow) using aria-label
+    const nextButton = container.querySelector('button[aria-label="Next tab"]');
+    expect(nextButton).toBeInTheDocument();
+    expect(nextButton).not.toBeDisabled();
+
+    // Click next to go to Web Search
+    await user.click(nextButton!);
+
+    // Now Web Search should be active
+    const webSearchButton = screen.getByText("Web Search").closest("button");
+    expect(webSearchButton).toHaveClass("bg-neutral-800");
+
+    // Internal Search should no longer be active
+    expect(internalSearchButton).not.toHaveClass("bg-neutral-800");
+
+    // Previous button should now be enabled
+    const prevButton = container.querySelector(
+      'button[aria-label="Previous tab"]'
+    );
+    expect(prevButton).not.toBeDisabled();
+
+    // Click previous to go back to Internal Search
+    await user.click(prevButton!);
+
+    // Internal Search should be active again
+    expect(internalSearchButton).toHaveClass("bg-neutral-800");
+  });
+
+  test("arrow buttons are disabled at boundaries", () => {
+    const parallelGroups = [
+      {
+        turn_index: 0,
+        tab_index: 0,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "search_tool_start", is_internet_search: false },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 0 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+      {
+        turn_index: 0,
+        tab_index: 1,
+        packets: [
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "search_tool_start", is_internet_search: true },
+          },
+          {
+            placement: { turn_index: 0, tab_index: 1 },
+            obj: { type: "section_end" },
+          },
+        ],
+      },
+    ];
+
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={parallelGroups as any}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={true}
+        stopPacketSeen={true}
+      />
+    );
+
+    // At the first tab, previous should be disabled
+    const prevButton = container.querySelector(
+      'button[aria-label="Previous tab"]'
+    );
+    expect(prevButton).toBeDisabled();
+
+    // Next should be enabled since there's another tab
+    const nextButton = container.querySelector('button[aria-label="Next tab"]');
+    expect(nextButton).not.toBeDisabled();
+  });
+});
+
+describe("MultiToolRenderer - Shimmering", () => {
+  test("stops shimmering when isStreaming is false", () => {
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={createToolGroups(2)}
+        chatState={createMockChatState()}
+        isComplete={false}
+        isFinalAnswerComing={false}
+        stopPacketSeen={false}
+        isStreaming={false}
+      />
+    );
+
+    // When isStreaming is false, loading-text class should not be applied
+    const loadingElements = container.querySelectorAll(".loading-text");
+    expect(loadingElements.length).toBe(0);
+  });
+
+  test("applies shimmer classes when streaming", () => {
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={createToolGroups(2)}
+        chatState={createMockChatState()}
+        isComplete={false}
+        isFinalAnswerComing={false}
+        stopPacketSeen={false}
+        isStreaming={true}
+      />
+    );
+
+    // When isStreaming is true, loading-text class should be applied
+    const loadingElements = container.querySelectorAll(".loading-text");
+    expect(loadingElements.length).toBeGreaterThan(0);
+  });
+
+  test("stops shimmering when stopPacketSeen is true", () => {
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={createToolGroups(2)}
+        chatState={createMockChatState()}
+        isComplete={false}
+        isFinalAnswerComing={false}
+        stopPacketSeen={true}
+        isStreaming={true}
+      />
+    );
+
+    // When stopPacketSeen is true, shimmering should stop regardless of isStreaming
+    const loadingElements = container.querySelectorAll(".loading-text");
+    expect(loadingElements.length).toBe(0);
+  });
+
+  test("stops shimmering when isComplete is true", () => {
+    const { container } = render(
+      <MultiToolRenderer
+        packetGroups={createToolGroups(2)}
+        chatState={createMockChatState()}
+        isComplete={true}
+        isFinalAnswerComing={false}
+        stopPacketSeen={false}
+        isStreaming={true}
+      />
+    );
+
+    // When isComplete is true, shimmering should stop
+    const loadingElements = container.querySelectorAll(".loading-text");
+    expect(loadingElements.length).toBe(0);
   });
 });

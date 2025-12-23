@@ -3,6 +3,7 @@ import {
   WellKnownLLMProviderDescriptor,
 } from "@/app/admin/configuration/llm/interfaces";
 import { dynamicProviderConfigs } from "@/app/admin/configuration/llm/utils";
+import { parseAzureTargetUri } from "@/lib/azureTargetUri";
 
 export const buildInitialValues = (
   llmDescriptor?: WellKnownLLMProviderDescriptor,
@@ -17,7 +18,6 @@ export const buildInitialValues = (
       api_base: "",
       api_version: "",
       default_model_name: "",
-      fast_default_model_name: "",
       model_configurations: [
         {
           name: "",
@@ -44,8 +44,6 @@ export const buildInitialValues = (
     custom_config: {},
     deployment_name: "",
     target_uri: "",
-    fast_default_model_name:
-      llmDescriptor?.default_fast_model ?? llmDescriptor?.default_model ?? "",
     name: llmDescriptor?.name ?? "Default",
     provider: llmDescriptor?.name ?? "",
     model_configurations:
@@ -121,11 +119,16 @@ export const testApiKeyHelper = async (
   let finalDeploymentName = formValues?.deployment_name;
 
   if (llmDescriptor.name === "azure" && formValues?.target_uri) {
-    const url = new URL(formValues.target_uri);
-    finalApiBase = url.origin;
-    finalApiVersion = url.searchParams.get("api-version") || "";
-    const pathMatch = url.pathname.match(/\/openai\/deployments\/([^\/]+)/);
-    finalDeploymentName = pathMatch?.[1] || "";
+    try {
+      const { url, apiVersion, deploymentName } = parseAzureTargetUri(
+        formValues.target_uri
+      );
+      finalApiBase = url.origin;
+      finalApiVersion = apiVersion;
+      finalDeploymentName = deploymentName || "";
+    } catch {
+      // leave defaults so validation can surface errors upstream
+    }
   }
 
   const payload = {

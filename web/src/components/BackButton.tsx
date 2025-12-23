@@ -1,8 +1,9 @@
 "use client";
 
-import SvgArrowLeft from "@/icons/arrow-left";
 import Button from "@/refresh-components/buttons/Button";
 import { useRouter } from "next/navigation";
+import type { Route } from "next";
+import { SvgArrowLeft } from "@opal/icons";
 
 export interface BackButtonProps {
   behaviorOverride?: () => void;
@@ -23,7 +24,7 @@ export function BackButton({
         if (behaviorOverride) {
           behaviorOverride();
         } else if (routerOverride) {
-          router.push(routerOverride);
+          router.push(routerOverride as Route);
         } else {
           router.back();
         }

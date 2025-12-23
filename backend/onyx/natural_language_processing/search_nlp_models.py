@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -14,10 +15,10 @@ from typing import cast
 import aioboto3  # type: ignore
 import httpx
 import requests
-import voyageai  # type: ignore
+import voyageai  # type: ignore[import-untyped]
 from cohere import AsyncClient as CohereAsyncClient
 from cohere.core.api_error import ApiError
-from google.oauth2 import service_account  # type: ignore
+from google.oauth2 import service_account
 from httpx import HTTPError
 from requests import JSONDecodeError
 from requests import RequestException
@@ -30,7 +31,6 @@ from onyx.configs.model_configs import BATCH_SIZE_ENCODE_CHUNKS
 from onyx.configs.model_configs import (
     BATCH_SIZE_ENCODE_CHUNKS_FOR_API_EMBEDDING_SERVICES,
 )
-from onyx.configs.model_configs import DOC_EMBEDDING_CONTEXT_SIZE
 from onyx.connectors.models import ConnectorStopSignal
 from onyx.db.models import SearchSettings
 from onyx.indexing.indexing_heartbeat import IndexingHeartbeatInterface
@@ -45,7 +45,9 @@ from onyx.natural_language_processing.utils import get_tokenizer
 from onyx.natural_language_processing.utils import tokenizer_trim_content
 from onyx.utils.logger import setup_logger
 from onyx.utils.search_nlp_models_utils import pass_aws_key
+from onyx.utils.timing import log_function_time
 from shared_configs.configs import API_BASED_EMBEDDING_TIMEOUT
+from shared_configs.configs import DOC_EMBEDDING_CONTEXT_SIZE
 from shared_configs.configs import INDEXING_MODEL_SERVER_HOST
 from shared_configs.configs import INDEXING_MODEL_SERVER_PORT
 from shared_configs.configs import INDEXING_ONLY
@@ -86,6 +88,30 @@ _AUTH_ERROR_401 = "401"
 _AUTH_ERROR_UNAUTHORIZED = "unauthorized"
 _AUTH_ERROR_INVALID_API_KEY = "invalid api key"
 _AUTH_ERROR_PERMISSION = "permission"
+
+# Thread-local storage for event loops
+# This prevents creating thousands of event loops during batch processing,
+# which was causing severe memory leaks with API-based embedding providers
+_thread_local = threading.local()
+
+
+def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
+    """Get or create a thread-local event loop for API embedding calls.
+
+    This prevents creating a new event loop for every batch during embedding,
+    which was causing memory leaks. Instead, each thread reuses the same loop.
+
+    Returns:
+        asyncio.AbstractEventLoop: The thread-local event loop
+    """
+    if (
+        not hasattr(_thread_local, "loop")
+        or _thread_local.loop is None
+        or _thread_local.loop.is_closed()
+    ):
+        _thread_local.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_thread_local.loop)
+    return _thread_local.loop
 
 
 WARM_UP_STRINGS = [
@@ -263,43 +289,87 @@ class CloudEmbedding:
         return embeddings
 
     async def _embed_vertex(
-        self, texts: list[str], model: str | None, embedding_type: str
+        self,
+        texts: list[str],
+        model: str | None,
+        embedding_type: str,
+        reduced_dimension: int | None,
     ) -> list[Embedding]:
-        import vertexai  # type: ignore[import-untyped]
-        from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput  # type: ignore[import-untyped]
+        from google import genai
+        from google.genai import types as genai_types
 
         if not model:
             model = DEFAULT_VERTEX_MODEL
 
         service_account_info = json.loads(self.api_key)
         credentials = service_account.Credentials.from_service_account_info(
-            service_account_info
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
         )
         project_id = service_account_info["project_id"]
-        vertexai.init(project=project_id, credentials=credentials)
-        client = TextEmbeddingModel.from_pretrained(model)
+        location = (
+            service_account_info.get("location")
+            or os.environ.get("GOOGLE_CLOUD_LOCATION")
+            or "us-central1"
+        )
 
-        inputs = [TextEmbeddingInput(text, embedding_type) for text in texts]
+        client = genai.Client(
+            vertexai=True,
+            project=project_id,
+            location=location,
+            credentials=credentials,
+        )
 
-        # Split into batches of 25 texts
-        max_texts_per_batch = VERTEXAI_EMBEDDING_LOCAL_BATCH_SIZE
-        batches = [
-            inputs[i : i + max_texts_per_batch]
-            for i in range(0, len(inputs), max_texts_per_batch)
-        ]
+        embed_config = genai_types.EmbedContentConfig(
+            task_type=embedding_type,
+            output_dimensionality=reduced_dimension,
+            auto_truncate=True,
+        )
 
-        # Dispatch all embedding calls asynchronously at once
-        tasks = [
-            client.get_embeddings_async(
-                cast(list[str | TextEmbeddingInput], batch), auto_truncate=True
+        async def _embed_batch(batch_texts: list[str]) -> list[Embedding]:
+            content_requests: list[Any] = [
+                genai_types.Content(parts=[genai_types.Part(text=text)])
+                for text in batch_texts
+            ]
+            response = await client.aio.models.embed_content(
+                model=model,
+                contents=content_requests,
+                config=embed_config,
             )
-            for batch in batches
+
+            if not response.embeddings:
+                raise RuntimeError("Received empty embeddings from Google GenAI.")
+
+            embeddings: list[Embedding] = []
+            for idx, embedding in enumerate(response.embeddings):
+                if embedding.values is None:
+                    raise RuntimeError(
+                        f"Missing embedding values for input at index {idx}."
+                    )
+                embeddings.append(embedding.values)
+            return embeddings
+
+        # Process VertexAI batches sequentially to avoid additional intra-task fanout.
+        # The higher-level thread pool already provides concurrency; running these
+        # requests in parallel here was causing excessive memory usage.
+        batches = [
+            texts[i : i + VERTEXAI_EMBEDDING_LOCAL_BATCH_SIZE]
+            for i in range(0, len(texts), VERTEXAI_EMBEDDING_LOCAL_BATCH_SIZE)
         ]
-
-        # Wait for all tasks to complete in parallel
-        results = await asyncio.gather(*tasks)
-
-        return [embedding.values for batch in results for embedding in batch]
+        all_embeddings: list[Embedding] = []
+        try:
+            for batch in batches:
+                batch_embeddings = await _embed_batch(batch)
+                all_embeddings.extend(batch_embeddings)
+            return all_embeddings
+        finally:
+            # Ensure client is closed with a timeout to prevent hanging on stuck sessions
+            try:
+                await asyncio.wait_for(client.aio.aclose(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Google GenAI client aclose() timed out after 5s")
+            except Exception as e:
+                logger.warning(f"Error closing Google GenAI client: {e}")
 
     async def _embed_litellm_proxy(
         self, texts: list[str], model_name: str | None
@@ -352,7 +422,9 @@ class CloudEmbedding:
             elif self.provider == EmbeddingProvider.VOYAGE:
                 return await self._embed_voyage(texts, model_name, embedding_type)
             elif self.provider == EmbeddingProvider.GOOGLE:
-                return await self._embed_vertex(texts, model_name, embedding_type)
+                return await self._embed_vertex(
+                    texts, model_name, embedding_type, reduced_dimension
+                )
             else:
                 raise ValueError(f"Unsupported provider: {self.provider}")
         except openai.AuthenticationError:
@@ -735,16 +807,14 @@ class EmbeddingModel:
             # Route between direct API calls and model server calls
             if self.provider_type is not None:
                 # For API providers, make direct API call
-                loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(loop)
-                    response = loop.run_until_complete(
-                        self._make_direct_api_call(
-                            embed_request, tenant_id=tenant_id, request_id=request_id
-                        )
+                # Use thread-local event loop to prevent memory leaks from creating
+                # thousands of event loops during batch processing
+                loop = _get_or_create_event_loop()
+                response = loop.run_until_complete(
+                    self._make_direct_api_call(
+                        embed_request, tenant_id=tenant_id, request_id=request_id
                     )
-                finally:
-                    loop.close()
+                )
             else:
                 # For local models, use model server
                 response = self._make_model_server_request(
@@ -808,6 +878,7 @@ class EmbeddingModel:
 
         return embeddings
 
+    @log_function_time(print_only=True, debug_only=True)
     def encode(
         self,
         texts: list[str],
@@ -1026,6 +1097,17 @@ class InformationContentClassificationModel:
         self,
         queries: list[str],
     ) -> list[ContentClassificationPrediction]:
+        if os.environ.get("DISABLE_MODEL_SERVER", "").lower() == "true":
+            logger.info(
+                "DISABLE_MODEL_SERVER is set, returning default classifications"
+            )
+            return [
+                ContentClassificationPrediction(
+                    predicted_label=1, content_boost_factor=1.0
+                )
+                for _ in queries
+            ]
+
         response = requests.post(self.content_server_endpoint, json=queries)
         response.raise_for_status()
 
@@ -1052,6 +1134,14 @@ class ConnectorClassificationModel:
         query: str,
         available_connectors: list[str],
     ) -> list[str]:
+        # Check if model server is disabled
+        if os.environ.get("DISABLE_MODEL_SERVER", "").lower() == "true":
+            logger.info(
+                "DISABLE_MODEL_SERVER is set, returning all available connectors"
+            )
+            # Return all available connectors when model server is disabled
+            return available_connectors
+
         connector_classification_request = ConnectorClassificationRequest(
             available_connectors=available_connectors,
             query=query,

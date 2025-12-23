@@ -4,17 +4,16 @@ import re
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
-from enum import Enum
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
 from onyx.configs.app_configs import MAX_SLACK_QUERY_EXPANSIONS
-from onyx.context.search.models import SearchQuery
+from onyx.context.search.federated.models import ChannelMetadata
+from onyx.context.search.models import ChunkIndexRequest
 from onyx.federated_connectors.slack.models import SlackEntities
 from onyx.llm.interfaces import LLM
-from onyx.llm.utils import message_to_string
+from onyx.llm.utils import llm_response_to_string
 from onyx.onyxbot.slack.models import ChannelType
 from onyx.prompts.federated_search import SLACK_DATE_EXTRACTION_PROMPT
 from onyx.prompts.federated_search import SLACK_QUERY_EXPANSION_PROMPT
@@ -29,16 +28,51 @@ DAYS_PER_WEEK = 7
 DAYS_PER_MONTH = 30
 MAX_CONTENT_WORDS = 3
 
+# Punctuation to strip from words during analysis
+WORD_PUNCTUATION = ".,!?;:\"'#"
+
 RECENCY_KEYWORDS = ["recent", "latest", "newest", "last"]
 
+# All Slack channel types for fetching metadata
+ALL_CHANNEL_TYPES = [
+    ChannelType.PUBLIC_CHANNEL.value,
+    ChannelType.IM.value,
+    ChannelType.MPIM.value,
+    ChannelType.PRIVATE_CHANNEL.value,
+]
 
-class ChannelTypeString(str, Enum):
-    """String representations of Slack channel types."""
+# Map Slack API scopes to their corresponding channel types
+# This is used for graceful degradation when scopes are missing
+SCOPE_TO_CHANNEL_TYPE_MAP = {
+    "mpim:read": ChannelType.MPIM.value,
+    "mpim:history": ChannelType.MPIM.value,
+    "im:read": ChannelType.IM.value,
+    "im:history": ChannelType.IM.value,
+    "groups:read": ChannelType.PRIVATE_CHANNEL.value,
+    "groups:history": ChannelType.PRIVATE_CHANNEL.value,
+    "channels:read": ChannelType.PUBLIC_CHANNEL.value,
+    "channels:history": ChannelType.PUBLIC_CHANNEL.value,
+}
 
-    IM = "im"
-    MPIM = "mpim"
-    PRIVATE_CHANNEL = "private_channel"
-    PUBLIC_CHANNEL = "public_channel"
+
+def get_channel_type_for_missing_scope(scope: str) -> str | None:
+    """Get the channel type that requires a specific Slack scope.
+
+    Args:
+        scope: The Slack API scope (e.g., 'mpim:read', 'im:history')
+
+    Returns:
+        The channel type string if scope is recognized, None otherwise
+
+    Examples:
+        >>> get_channel_type_for_missing_scope('mpim:read')
+        'mpim'
+        >>> get_channel_type_for_missing_scope('im:read')
+        'im'
+        >>> get_channel_type_for_missing_scope('unknown:scope')
+        None
+    """
+    return SCOPE_TO_CHANNEL_TYPE_MAP.get(scope)
 
 
 def _parse_llm_code_block_response(response: str) -> str:
@@ -64,10 +98,39 @@ def _parse_llm_code_block_response(response: str) -> str:
 
 
 def is_recency_query(query: str) -> bool:
-    return any(
+    """Check if a query is primarily about recency (not content + recency).
+
+    Returns True only for pure recency queries like "recent messages" or "latest updates",
+    but False for queries with content + recency like "golf scores last saturday".
+    """
+    # Check if query contains recency keywords
+    has_recency_keyword = any(
         re.search(rf"\b{re.escape(keyword)}\b", query, flags=re.IGNORECASE)
         for keyword in RECENCY_KEYWORDS
     )
+
+    if not has_recency_keyword:
+        return False
+
+    # Get combined stop words (NLTK + Slack-specific)
+    all_stop_words = _get_combined_stop_words()
+
+    # Extract content words (excluding stop words)
+    query_lower = query.lower()
+    words = query_lower.split()
+
+    # Count content words (not stop words, length > 2)
+    content_word_count = 0
+    for word in words:
+        clean_word = word.strip(WORD_PUNCTUATION)
+        if clean_word and len(clean_word) > 2 and clean_word not in all_stop_words:
+            content_word_count += 1
+
+    # If query has significant content words (>= 2), it's not a pure recency query
+    # Examples:
+    # - "recent messages" -> content_word_count = 0 -> pure recency
+    # - "golf scores last saturday" -> content_word_count = 3 (golf, scores, saturday) -> not pure recency
+    return content_word_count < 2
 
 
 def extract_date_range_from_query(
@@ -82,6 +145,21 @@ def extract_date_range_from_query(
 
     if re.search(r"\byesterday\b", query_lower):
         return min(1, default_search_days)
+
+    # Handle "last [day of week]" - e.g., "last monday", "last saturday"
+    days_of_week = [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
+    for day in days_of_week:
+        if re.search(rf"\b(?:last|this)\s+{day}\b", query_lower):
+            # Assume last occurrence of that day was within the past week
+            return min(DAYS_PER_WEEK, default_search_days)
 
     match = re.search(r"\b(?:last|past)\s+(\d+)\s+days?\b", query_lower)
     if match:
@@ -112,30 +190,46 @@ def extract_date_range_from_query(
 
     try:
         prompt = SLACK_DATE_EXTRACTION_PROMPT.format(query=query)
-        response = message_to_string(
-            llm.invoke_langchain([HumanMessage(content=prompt)])
-        )
+        response = llm_response_to_string(llm.invoke(prompt))
 
         response_clean = _parse_llm_code_block_response(response)
 
         try:
             data = json.loads(response_clean)
+            if not isinstance(data, dict):
+                logger.debug(
+                    f"LLM date extraction returned non-dict response for query: "
+                    f"'{query}', using default: {default_search_days} days"
+                )
+                return default_search_days
+
             days_back = data.get("days_back")
             if days_back is None:
                 logger.debug(
-                    f"LLM date extraction returned null for query: '{query}', using default: {default_search_days} days"
+                    f"LLM date extraction returned null for query: '{query}', "
+                    f"using default: {default_search_days} days"
                 )
                 return default_search_days
+
+            if not isinstance(days_back, (int, float)):
+                logger.debug(
+                    f"LLM date extraction returned non-numeric days_back for "
+                    f"query: '{query}', using default: {default_search_days} days"
+                )
+                return default_search_days
+
         except json.JSONDecodeError:
             logger.debug(
-                f"Failed to parse LLM date extraction response for query: '{query}', using default: {default_search_days} days"
+                f"Failed to parse LLM date extraction response for query: '{query}' "
+                f"(response: '{response_clean}'), "
+                f"using default: {default_search_days} days"
             )
             return default_search_days
 
-        return min(days_back, default_search_days)
+        return min(int(days_back), default_search_days)
 
     except Exception as e:
-        logger.warning(f"Error extracting date range with LLM: {e}")
+        logger.warning(f"Error extracting date range with LLM for query '{query}': {e}")
         return default_search_days
 
 
@@ -227,7 +321,7 @@ def build_channel_query_filter(
 def get_channel_type(
     channel_info: dict[str, Any] | None = None,
     channel_id: str | None = None,
-    channel_metadata: dict[str, dict[str, Any]] | None = None,
+    channel_metadata: dict[str, ChannelMetadata] | None = None,
 ) -> ChannelType:
     """
     Determine channel type from channel info dict or by looking up channel_id.
@@ -254,11 +348,11 @@ def get_channel_type(
         ch_meta = channel_metadata.get(channel_id)
         if ch_meta:
             type_str = ch_meta.get("type")
-            if type_str == ChannelTypeString.IM.value:
+            if type_str == ChannelType.IM.value:
                 return ChannelType.IM
-            elif type_str == ChannelTypeString.MPIM.value:
+            elif type_str == ChannelType.MPIM.value:
                 return ChannelType.MPIM
-            elif type_str == ChannelTypeString.PRIVATE_CHANNEL.value:
+            elif type_str == ChannelType.PRIVATE_CHANNEL.value:
                 return ChannelType.PRIVATE_CHANNEL
             return ChannelType.PUBLIC_CHANNEL
 
@@ -413,6 +507,29 @@ SLACK_SPECIFIC_STOP_WORDS = frozenset(
 )
 
 
+def _get_combined_stop_words() -> set[str]:
+    """Get combined NLTK + Slack-specific stop words.
+
+    Returns a set of stop words for filtering content words.
+    Falls back to just Slack-specific stop words if NLTK is unavailable.
+
+    Note: Currently only supports English stop words. Non-English queries
+    may have suboptimal content word extraction. Future enhancement could
+    detect query language and load appropriate stop words.
+    """
+    try:
+        from nltk.corpus import stopwords  # type: ignore
+
+        # TODO: Support multiple languages - currently hardcoded to English
+        # Could detect language or allow configuration
+        nltk_stop_words = set(stopwords.words("english"))
+    except Exception:
+        # Fallback if NLTK not available
+        nltk_stop_words = set()
+
+    return nltk_stop_words | SLACK_SPECIFIC_STOP_WORDS
+
+
 def extract_content_words_from_recency_query(
     query_text: str, channel_references: set[str]
 ) -> list[str]:
@@ -427,28 +544,19 @@ def extract_content_words_from_recency_query(
     Returns:
         List of content words (up to MAX_CONTENT_WORDS)
     """
-    # Get standard English stop words from NLTK (lazy import)
-    try:
-        from nltk.corpus import stopwords  # type: ignore
-
-        nltk_stop_words = set(stopwords.words("english"))
-    except Exception:
-        # Fallback if NLTK not available
-        nltk_stop_words = set()
-
-    # Combine NLTK stop words with Slack-specific stop words
-    all_stop_words = nltk_stop_words | SLACK_SPECIFIC_STOP_WORDS
+    # Get combined stop words (NLTK + Slack-specific)
+    all_stop_words = _get_combined_stop_words()
 
     words = query_text.split()
     content_words = []
 
     for word in words:
-        clean_word = word.lower().strip(".,!?;:\"'#")
+        clean_word = word.lower().strip(WORD_PUNCTUATION)
         # Skip if it's a channel reference or a stop word
         if clean_word in channel_references:
             continue
         if clean_word and clean_word not in all_stop_words and len(clean_word) > 2:
-            clean_word_orig = word.strip(".,!?;:\"'#")
+            clean_word_orig = word.strip(WORD_PUNCTUATION)
             if clean_word_orig.lower() not in all_stop_words:
                 content_words.append(clean_word_orig)
 
@@ -473,9 +581,7 @@ def expand_query_with_llm(query_text: str, llm: LLM) -> list[str]:
     )
 
     try:
-        response = message_to_string(
-            llm.invoke_langchain([HumanMessage(content=prompt)])
-        )
+        response = llm_response_to_string(llm.invoke(prompt))
 
         response_clean = _parse_llm_code_block_response(response)
 
@@ -489,7 +595,7 @@ def expand_query_with_llm(query_text: str, llm: LLM) -> list[str]:
             logger.debug("No content keywords extracted from query expansion")
             return [""]
 
-        logger.info(
+        logger.debug(
             f"Expanded query into {len(rephrased_queries)} queries: {rephrased_queries}"
         )
         return rephrased_queries[:MAX_SLACK_QUERY_EXPANSIONS]
@@ -500,7 +606,7 @@ def expand_query_with_llm(query_text: str, llm: LLM) -> list[str]:
 
 
 def build_slack_queries(
-    query: SearchQuery,
+    query: ChunkIndexRequest,
     llm: LLM,
     entities: dict[str, Any] | None = None,
     available_channels: list[str] | None = None,
@@ -515,7 +621,9 @@ def build_slack_queries(
             logger.warning(f"Invalid entities in build_slack_queries: {e}")
 
     days_back = extract_date_range_from_query(
-        query.original_query or query.query, llm, default_search_days
+        query=query.query,
+        llm=llm,
+        default_search_days=default_search_days,
     )
 
     # get time filter
@@ -527,10 +635,8 @@ def build_slack_queries(
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
             time_filter = f" after:{cutoff_date.strftime('%Y-%m-%d')}"
 
-    original_query_text = query.original_query or query.query
-
     # ALWAYS extract channel references from the query (not just for recency queries)
-    channel_references = extract_channel_references_from_query(original_query_text)
+    channel_references = extract_channel_references_from_query(query.query)
 
     # Validate channel references against available channels and entity config
     # This will raise ValueError if channels are invalid
@@ -552,15 +658,15 @@ def build_slack_queries(
             channel_references = set()
 
     # use llm to generate slack queries (use original query to use same keywords as the user)
-    if is_recency_query(original_query_text):
+    if is_recency_query(query.query):
         # For recency queries, extract content words (excluding channel names and stop words)
         content_words = extract_content_words_from_recency_query(
-            original_query_text, channel_references
+            query.query, channel_references
         )
         rephrased_queries = [" ".join(content_words)] if content_words else [""]
     else:
         # For other queries, use LLM to expand into multiple variations
-        rephrased_queries = expand_query_with_llm(original_query_text, llm)
+        rephrased_queries = expand_query_with_llm(query.query, llm)
 
     # Build final query strings with time filters
     return [

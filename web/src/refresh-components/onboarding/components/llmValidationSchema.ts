@@ -1,4 +1,5 @@
 import * as Yup from "yup";
+import { isValidAzureTargetUri } from "@/lib/azureTargetUri";
 
 export const getValidationSchema = (
   providerName: string | undefined,
@@ -38,7 +39,6 @@ export const getValidationSchema = (
         )
         .min(1, "At least one model configuration is required"),
       default_model_name: Yup.string().required("Default model is required"),
-      fast_default_model_name: Yup.string().nullable(),
       custom_config: Yup.object(),
     });
   }
@@ -82,34 +82,7 @@ export const getValidationSchema = (
           .test(
             "valid-target-uri",
             "Target URI must be a valid URL with api-version query parameter and either a deployment name in the path (/openai/deployments/{name}/...) or /openai/responses for realtime",
-            (value) => {
-              if (!value) return false;
-              try {
-                const url = new URL(value);
-                const hasApiVersion = !!url.searchParams
-                  .get("api-version")
-                  ?.trim();
-
-                // Check if the path contains a valid Azure OpenAI endpoint:
-                // 1. /openai/deployments/{deployment-name}/... (standard pattern)
-                // 2. /openai/responses (realtime/streaming responses)
-                const pathMatch = url.pathname.match(
-                  /\/openai\/(deployments\/[^\/]+|responses)/
-                );
-                const hasDeploymentName = Boolean(
-                  pathMatch && pathMatch[1]?.startsWith("deployments/")
-                );
-                const isResponsesPath = Boolean(
-                  pathMatch && pathMatch[1] === "responses"
-                );
-                const hasValidPath = hasDeploymentName || isResponsesPath;
-
-                return hasApiVersion && hasValidPath;
-              } catch (error) {
-                console.error("URL parsing error:", error);
-                return false;
-              }
-            }
+            (value) => (value ? isValidAzureTargetUri(value) : false)
           ),
       });
 

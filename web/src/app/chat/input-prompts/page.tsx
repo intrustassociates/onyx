@@ -1,15 +1,10 @@
-"use client";
+import InputPrompts from "@/app/chat/input-prompts/InputPrompts";
+import AppPageLayout from "@/layouts/AppPageLayout";
 
-import InputPrompts from "./InputPrompts";
-
-export default function InputPromptsPage() {
+export default async function InputPromptsPage() {
   return (
-    <div className="w-full py-16">
-      <div className="px-32">
-        <div className="mx-auto container">
-          <InputPrompts />
-        </div>
-      </div>
-    </div>
+    <AppPageLayout>
+      <InputPrompts />
+    </AppPageLayout>
   );
 }

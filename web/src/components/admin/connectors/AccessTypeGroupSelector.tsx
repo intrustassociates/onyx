@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { FieldArray, ArrayHelpers, ErrorMessage, useField } from "formik";
 import Text from "@/refresh-components/texts/Text";
 import Button from "@/refresh-components/buttons/Button";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
 import { UserGroup, UserRole } from "@/lib/types";
 import { useUserGroups } from "@/lib/hooks";
 import {
@@ -13,8 +13,7 @@ import {
   validAutoSyncSources,
 } from "@/lib/types";
 import { useUser } from "@/components/user/UserProvider";
-import SvgUsers from "@/icons/users";
-
+import { SvgUsers } from "@opal/icons";
 function isValidAutoSyncSource(
   value: ConfigurableSources
 ): value is ValidAutoSyncSource {

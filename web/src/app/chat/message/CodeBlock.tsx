@@ -1,9 +1,7 @@
-import SvgCheck from "@/icons/check";
-import SvgCode from "@/icons/code";
-import SvgCopy from "@/icons/copy";
 import { cn } from "@/lib/utils";
 import Text from "@/refresh-components/texts/Text";
 import React, { useState, ReactNode, useCallback, useMemo, memo } from "react";
+import { SvgCheck, SvgCode, SvgCopy } from "@opal/icons";
 
 interface CodeBlockProps {
   className?: string;
@@ -83,7 +81,7 @@ export const CodeBlock = memo(function CodeBlock({
   const CodeContent = () => {
     if (!language) {
       return (
-        <pre className="!p-2 hljs">
+        <pre className="!p-2 m-0 overflow-x-auto w-0 min-w-full hljs">
           <code className={`text-sm hljs ${className}`}>
             {Array.isArray(children)
               ? children.map((child, index) => (
@@ -96,8 +94,8 @@ export const CodeBlock = memo(function CodeBlock({
     }
 
     return (
-      <pre className="!p-2 hljs">
-        <code className="text-xs overflow-x-auto">
+      <pre className="!p-2 m-0 overflow-x-auto w-0 min-w-full hljs">
+        <code className="text-xs">
           {Array.isArray(children)
             ? children.map((child, index) => (
                 <MemoizedCodeLine key={index} content={child} />
@@ -109,7 +107,7 @@ export const CodeBlock = memo(function CodeBlock({
   };
 
   return (
-    <div className="overflow-x-hidden bg-background-tint-00 px-1 pb-1 rounded-12">
+    <div className="bg-background-tint-00 px-1 pb-1 rounded-12 max-w-full min-w-0">
       {language && (
         <div className="flex px-2 py-1 text-sm text-text-04 gap-x-2">
           <SvgCode

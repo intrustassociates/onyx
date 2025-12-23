@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import Button from "@/refresh-components/buttons/Button";
 import { Callout } from "@/components/ui/callout";
@@ -7,17 +9,16 @@ import { SEARCH_PARAM_NAMES } from "@/app/chat/services/searchParams";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { structureValue } from "@/lib/llm/utils";
 import { LlmDescriptor, useLlmManager } from "@/lib/hooks";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
 import { AdvancedOptionsToggle } from "@/components/AdvancedOptionsToggle";
 import { cn } from "@/lib/utils";
-import { useAgentsContext } from "@/refresh-components/contexts/AgentsContext";
+import { useCurrentAgent } from "@/hooks/useAgents";
 import { useSearchParams } from "next/navigation";
 import { useChatSessionStore } from "@/app/chat/stores/useChatSessionStore";
 import ConfirmationModalLayout from "@/refresh-components/layouts/ConfirmationModalLayout";
-import SvgShare from "@/icons/share";
-import SvgCopy from "@/icons/copy";
 import IconButton from "@/refresh-components/buttons/IconButton";
 import { copyAll } from "@/app/chat/message/copyingUtils";
+import { SvgCopy, SvgShare } from "@opal/icons";
 
 function buildShareLink(chatSessionId: string) {
   const baseUrl = `${window.location.protocol}//${window.location.host}`;
@@ -97,7 +98,7 @@ export default function ShareChatSessionModal({
   );
   const { popup, setPopup } = usePopup();
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
-  const { currentAgent } = useAgentsContext();
+  const currentAgent = useCurrentAgent();
   const searchParams = useSearchParams();
   const message = searchParams?.get(SEARCH_PARAM_NAMES.USER_PROMPT) || "";
   const llmManager = useLlmManager(chatSession, currentAgent || undefined);

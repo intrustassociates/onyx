@@ -1,10 +1,11 @@
 "use client";
 
 import React from "react";
-import { SvgProps } from "@/icons";
+import type { IconProps } from "@opal/types";
 import { cn } from "@/lib/utils";
 import SimpleTooltip from "@/refresh-components/SimpleTooltip";
 import Link from "next/link";
+import type { Route } from "next";
 import Truncated from "@/refresh-components/texts/Truncated";
 
 const backgroundClasses = (active?: boolean) =>
@@ -60,7 +61,7 @@ export interface SidebarTabProps {
   onClick?: React.MouseEventHandler<HTMLDivElement>;
   href?: string;
   className?: string;
-  leftIcon?: React.FunctionComponent<SvgProps>;
+  leftIcon?: React.FunctionComponent<IconProps>;
   rightChildren?: React.ReactNode;
   children?: React.ReactNode;
 }
@@ -118,7 +119,13 @@ export default function SidebarTab({
     </div>
   );
 
-  const content = href ? <Link href={href}>{innerContent}</Link> : innerContent;
+  const content = href ? (
+    <Link href={href as Route} scroll={false}>
+      {innerContent}
+    </Link>
+  ) : (
+    innerContent
+  );
 
   if (typeof children !== "string") return content;
   if (folded)

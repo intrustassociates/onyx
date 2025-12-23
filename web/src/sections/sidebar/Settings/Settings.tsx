@@ -9,22 +9,19 @@ import { checkUserIsNoAuthUser, logout } from "@/lib/user";
 import { useUser } from "@/components/user/UserProvider";
 import { Avatar } from "@/components/ui/avatar";
 import Text from "@/refresh-components/texts/Text";
-import MenuButton from "@/refresh-components/buttons/MenuButton";
+import LineItem from "@/refresh-components/buttons/LineItem";
 import {
   Popover,
   PopoverContent,
   PopoverMenu,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import SvgLogOut from "@/icons/log-out";
-import SvgBell from "@/icons/bell";
-import SvgX from "@/icons/x";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import SvgUser from "@/icons/user";
 import { cn } from "@/lib/utils";
 import SidebarTab from "@/refresh-components/buttons/SidebarTab";
 import { useCreateModal } from "@/refresh-components/contexts/ModalContext";
 import UserSettings from "@/sections/sidebar/Settings/UserSettings";
+import { SvgBell, SvgLogOut, SvgUser, SvgX } from "@opal/icons";
 
 function getDisplayName(email?: string, personalName?: string): string {
   // Prioritize custom personal name if set
@@ -92,11 +89,11 @@ function SettingsPopover({
           //   </NavigationTab>
           // )),
           <div key="user-settings" data-testid="Settings/user-settings">
-            <MenuButton icon={SvgUser} onClick={onUserSettingsClick}>
+            <LineItem icon={SvgUser} onClick={onUserSettingsClick}>
               User Settings
-            </MenuButton>
+            </LineItem>
           </div>,
-          <MenuButton
+          <LineItem
             key="notifications"
             icon={SvgBell}
             onClick={onNotificationsClick}
@@ -106,17 +103,17 @@ function SettingsPopover({
                 ? `(${notifications.length})`
                 : ""
             }`}
-          </MenuButton>,
+          </LineItem>,
           null,
           showLogout && (
-            <MenuButton
+            <LineItem
               key="log-out"
               icon={SvgLogOut}
               danger
               onClick={handleLogout}
             >
               Log out
-            </MenuButton>
+            </LineItem>
           ),
         ]}
       </PopoverMenu>

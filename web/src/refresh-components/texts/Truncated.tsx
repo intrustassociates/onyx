@@ -86,7 +86,11 @@ export default function Truncated({
           </div>
 
           {showTooltip && (
-            <TooltipContent side={side} sideOffset={sideOffset}>
+            <TooltipContent
+              side={side}
+              sideOffset={sideOffset}
+              className="max-w-[400px] break-words whitespace-normal"
+            >
               {typeof children === "string" ? (
                 <Text textLight05>{children}</Text>
               ) : (
@@ -106,7 +110,7 @@ export default function Truncated({
         If the bottom `div` were placed first, any tests that try locating the string that the `Truncated` component is trying to render would find the bottom div first.
         This can break expectations (since it's supposed to be hidden in the first place).
 
-        All in all, keep the below `div` *below* the above `OooltipProvider`.
+        All in all, keep the below `div` *below* the above `TooltipProvider`.
 
         - @raunakab
       */}

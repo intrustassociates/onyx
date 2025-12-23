@@ -7,9 +7,15 @@ on:
   merge_group:
   pull_request:
     branches: [main]
+  push:
+    tags:
+      - "v*.*.*"
   schedule:
     # This cron expression runs the job daily at 16:00 UTC (9am PT)
     - cron: "0 16 * * *"
+
+permissions:
+  contents: read
 
 env:
   # AWS
@@ -123,18 +129,26 @@ jobs:
   connectors-check:
     # See https://runs-on.com/runners/linux/
     runs-on: [runs-on, runner=8cpu-linux-x64, "run-id=${{ github.run_id }}-connectors-check", "extras=s3-cache"]
+    timeout-minutes: 45
 
     env:
       PYTHONPATH: ./backend
+      DISABLE_TELEMETRY: "true"
 
     steps:
       - uses: runs-on/action@cd2b598b0515d39d78c38a02d529db87d2196d1e # ratchet:runs-on/action@v2
 
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # ratchet:actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # ratchet:actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Python and Install Dependencies
         uses: ./.github/actions/setup-python-and-install-dependencies
+        with:
+          requirements: |
+            backend/requirements/default.txt
+            backend/requirements/dev.txt
 
       - name: Setup Playwright
         uses: ./.github/actions/setup-playwright
@@ -147,16 +161,20 @@ jobs:
             hubspot:
               - 'backend/onyx/connectors/hubspot/**'
               - 'backend/tests/daily/connectors/hubspot/**'
+              - 'uv.lock'
             salesforce:
               - 'backend/onyx/connectors/salesforce/**'
               - 'backend/tests/daily/connectors/salesforce/**'
+              - 'uv.lock'
             github:
               - 'backend/onyx/connectors/github/**'
               - 'backend/tests/daily/connectors/github/**'
+              - 'uv.lock'
             file_processing:
               - 'backend/onyx/file_processing/**'
+              - 'uv.lock'
 
-      - name: Run Tests (excluding HubSpot, Salesforce, and GitHub)
+      - name: Run Tests (excluding HubSpot, Salesforce, GitHub, and Coda)
         shell: script -q -e -c "bash --noprofile --norc -eo pipefail {0}"
         run: |
           py.test \
@@ -169,7 +187,8 @@ jobs:
             backend/tests/daily/connectors \
             --ignore backend/tests/daily/connectors/hubspot \
             --ignore backend/tests/daily/connectors/salesforce \
-            --ignore backend/tests/daily/connectors/github
+            --ignore backend/tests/daily/connectors/github \
+            --ignore backend/tests/daily/connectors/coda
 
       - name: Run HubSpot Connector Tests
         if: ${{ github.event_name == 'schedule' || steps.changes.outputs.hubspot == 'true' || steps.changes.outputs.file_processing == 'true' }}
@@ -214,8 +233,10 @@ jobs:
         if: failure() && github.event_name == 'schedule'
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           curl -X POST \
             -H 'Content-type: application/json' \
-            --data '{"text":"Scheduled Connector Tests failed! Check the run at: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
+            --data "{\"text\":\"Scheduled Connector Tests failed! Check the run at: https://github.com/${REPO}/actions/runs/${RUN_ID}\"}" \
             $SLACK_WEBHOOK

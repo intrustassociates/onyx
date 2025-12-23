@@ -25,14 +25,14 @@ from onyx.background.celery.celery_redis import celery_get_unacked_task_ids
 from onyx.background.celery.celery_utils import httpx_init_vespa_pool
 from onyx.background.celery.memory_monitoring import emit_process_memory
 from onyx.background.celery.tasks.beat_schedule import CLOUD_BEAT_MULTIPLIER_DEFAULT
+from onyx.background.celery.tasks.docfetching.task_creation_utils import (
+    try_creating_docfetching_task,
+)
 from onyx.background.celery.tasks.docprocessing.heartbeat import start_heartbeat
 from onyx.background.celery.tasks.docprocessing.heartbeat import stop_heartbeat
 from onyx.background.celery.tasks.docprocessing.utils import IndexingCallback
 from onyx.background.celery.tasks.docprocessing.utils import is_in_repeated_error_state
 from onyx.background.celery.tasks.docprocessing.utils import should_index
-from onyx.background.celery.tasks.docprocessing.utils import (
-    try_creating_docfetching_task,
-)
 from onyx.background.celery.tasks.models import DocProcessingContext
 from onyx.background.indexing.checkpointing_utils import cleanup_checkpoint
 from onyx.background.indexing.checkpointing_utils import (
@@ -45,6 +45,7 @@ from onyx.configs.app_configs import VESPA_CLOUD_CERT_PATH
 from onyx.configs.app_configs import VESPA_CLOUD_KEY_PATH
 from onyx.configs.constants import CELERY_GENERIC_BEAT_LOCK_TIMEOUT
 from onyx.configs.constants import CELERY_INDEXING_LOCK_TIMEOUT
+from onyx.configs.constants import MilestoneRecordType
 from onyx.configs.constants import OnyxCeleryPriority
 from onyx.configs.constants import OnyxCeleryQueues
 from onyx.configs.constants import OnyxCeleryTask
@@ -108,6 +109,7 @@ from onyx.redis.redis_utils import is_fence
 from onyx.server.runtime.onyx_runtime import OnyxRuntime
 from onyx.utils.logger import setup_logger
 from onyx.utils.middleware import make_randomized_onyx_request_id
+from onyx.utils.telemetry import mt_cloud_telemetry
 from onyx.utils.telemetry import optional_telemetry
 from onyx.utils.telemetry import RecordType
 from shared_configs.configs import INDEXING_MODEL_SERVER_HOST
@@ -156,8 +158,6 @@ def validate_active_indexing_attempts(
     """
     logger.info("Validating active indexing attempts")
 
-    heartbeat_timeout_seconds = HEARTBEAT_TIMEOUT_SECONDS
-
     with get_session_with_current_tenant() as db_session:
 
         # Find all active indexing attempts
@@ -174,6 +174,9 @@ def validate_active_indexing_attempts(
 
         for attempt in active_attempts:
             lock_beat.reacquire()
+
+            # Initialize timeout for each attempt to prevent state pollution
+            heartbeat_timeout_seconds = HEARTBEAT_TIMEOUT_SECONDS
 
             # Double-check the attempt still exists and has the same status
             fresh_attempt = get_index_attempt(db_session, attempt.id)
@@ -546,6 +549,12 @@ def check_indexing_completion(
                 )
                 db_session.commit()
 
+            mt_cloud_telemetry(
+                tenant_id=tenant_id,
+                distinct_id=tenant_id,
+                event=MilestoneRecordType.CONNECTOR_SUCCEEDED,
+            )
+
             # Clear repeated error state on success
             if cc_pair.in_repeated_error_state:
                 cc_pair.in_repeated_error_state = False
@@ -815,10 +824,14 @@ def check_for_indexing(self: Task, *, tenant_id: str) -> int | None:
             secondary_cc_pair_ids: list[int] = []
             secondary_search_settings = get_secondary_search_settings(db_session)
             if secondary_search_settings:
-                # Include paused CC pairs during embedding swap
+                # For ACTIVE_ONLY, we skip paused connectors
+                include_paused = (
+                    secondary_search_settings.switchover_type
+                    != SwitchoverType.ACTIVE_ONLY
+                )
                 standard_cc_pair_ids = (
                     fetch_indexable_standard_connector_credential_pair_ids(
-                        db_session, active_cc_pairs_only=False
+                        db_session, active_cc_pairs_only=not include_paused
                     )
                 )
                 user_file_cc_pair_ids = (

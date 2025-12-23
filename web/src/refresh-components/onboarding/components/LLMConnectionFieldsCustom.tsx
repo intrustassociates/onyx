@@ -3,7 +3,7 @@ import { FormikField } from "@/refresh-components/form/FormikField";
 import { FormField } from "@/refresh-components/form/FormField";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
 import PasswordInputTypeIn from "@/refresh-components/inputs/PasswordInputTypeIn";
-import { Separator } from "@/components/ui/separator";
+import Separator from "@/refresh-components/Separator";
 import KeyValueInput, {
   KeyValue,
 } from "@/refresh-components/inputs/InputKeyValue";
@@ -136,7 +136,7 @@ export const LLMConnectionFieldsCustom: React.FC<Props> = ({
                 placeholder="https://"
                 showClearButton={false}
                 disabled={disabled}
-                isError={
+                error={
                   typeof field.value === "string" &&
                   field.value.trim() !== "" &&
                   apiStatus === "error"
@@ -182,7 +182,7 @@ export const LLMConnectionFieldsCustom: React.FC<Props> = ({
                 placeholder=""
                 showClearButton={false}
                 disabled={disabled}
-                isError={apiStatus === "error"}
+                error={apiStatus === "error"}
               />
             </FormField.Control>
             {showApiMessage && (
@@ -285,40 +285,6 @@ export const LLMConnectionFieldsCustom: React.FC<Props> = ({
             <FormField.Message
               messages={{
                 idle: "This model will be used by Onyx by default for this provider. This must be one of the models listed above.",
-                error: meta.error,
-              }}
-            />
-          </FormField>
-        )}
-      />
-
-      <FormikField<string>
-        name="fast_default_model_name"
-        render={(field, helper, meta, state) => (
-          <FormField
-            name="fast_default_model_name"
-            state={state}
-            className="w-full"
-          >
-            <FormField.Label optional>Fast Model</FormField.Label>
-            <FormField.Control>
-              <InputTypeIn
-                {...field}
-                placeholder="Use default model"
-                showClearButton={false}
-                disabled={disabled}
-              />
-            </FormField.Control>
-            <FormField.Message
-              messages={{
-                idle: (
-                  <>
-                    A <strong>faster</strong>, more{" "}
-                    <strong>cost-effective</strong> model for quick background
-                    tasks (e.g. categorizing prompts, naming sessions). Falls
-                    back to the default model if not specified.
-                  </>
-                ),
                 error: meta.error,
               }}
             />
