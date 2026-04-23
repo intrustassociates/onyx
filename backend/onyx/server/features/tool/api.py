@@ -154,21 +154,26 @@ def update_tool_forced_args(
     tool_id: int,
     request: ToolForcedArgsUpdateRequest,
     db_session: Session = Depends(get_session),
-    user: User = Depends(current_curator_or_admin_user),  # noqa: ARG001
+    user: User = Depends(current_curator_or_admin_user),
 ) -> ToolSnapshot:
     """Set forced arguments for a tool (especially useful for MCP tools).
 
     Forced arguments are always injected into tool calls, overriding any
     values the LLM provides. Set to null to clear forced arguments.
     """
-    try:
-        tool = get_tool_by_id(tool_id, db_session)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    tool.forced_args = request.forced_args
-    db_session.commit()
-    return ToolSnapshot.from_model(tool)
+    _get_editable_custom_tool(tool_id, db_session, user)
+    updated_tool = update_tool(
+        tool_id=tool_id,
+        name=None,
+        description=None,
+        openapi_schema=None,
+        custom_headers=None,
+        user_id=None,
+        db_session=db_session,
+        passthrough_auth=None,
+        forced_args=request.forced_args,
+    )
+    return ToolSnapshot.from_model(updated_tool)
 
 
 class ToolStatusUpdateRequest(BaseModel):
