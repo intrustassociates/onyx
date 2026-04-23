@@ -238,6 +238,12 @@ class MCPTool(Tool[None]):
             # values (e.g., theme_id, org_id) cannot be overridden by the LLM.
             effective_kwargs = {**llm_kwargs, **self._forced_args}
 
+            if self._forced_args:
+                logger.info(
+                    f"MCP tool '{self._name}': applied forced_args {self._forced_args}, "
+                    f"effective kwargs: {effective_kwargs}"
+                )
+
             tool_result = call_mcp_tool(
                 self.mcp_server.server_url,
                 self._name,
