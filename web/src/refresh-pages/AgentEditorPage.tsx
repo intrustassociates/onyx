@@ -549,6 +549,7 @@ export default function AgentEditorPage({
         description: tool.description,
         isAvailable: true,
         isEnabled: tool.enabled,
+        forcedArgs: tool.forced_args,
       }));
 
     return { server, tools: serverTools, isLoading: false };
