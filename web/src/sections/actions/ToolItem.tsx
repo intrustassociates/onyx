@@ -231,16 +231,15 @@ const ToolItem: React.FC<ToolItemProps> = ({
 
           {/* Configure Button */}
           {onConfigure && (
-            <Button
-              icon={SvgSettings}
-              prominence="tertiary"
-              onClick={onConfigure}
-              tooltip="Configure forced arguments"
-              aria-label={`Configure ${name}`}
-              className={cn(
-                hasForcedArgs && "text-status-info-05"
-              )}
-            />
+            <div className={cn(hasForcedArgs && "text-status-info-05")}>
+              <Button
+                icon={SvgSettings}
+                prominence="tertiary"
+                onClick={onConfigure}
+                tooltip="Configure forced arguments"
+                aria-label={`Configure ${name}`}
+              />
+            </div>
           )}
 
           {/* Switch */}
