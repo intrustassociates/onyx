@@ -240,8 +240,8 @@ class MCPTool(Tool[None]):
 
             if self._forced_args:
                 logger.info(
-                    f"MCP tool '{self._name}': applied forced_args {self._forced_args}, "
-                    f"effective kwargs: {effective_kwargs}"
+                    f"MCP tool '{self._name}': applied forced args "
+                    f"({len(self._forced_args)} keys)"
                 )
 
             tool_result = call_mcp_tool(

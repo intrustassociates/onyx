@@ -22,14 +22,27 @@ function toKeyValueItems(args: Record<string, any> | null): KeyValue[] {
   if (!args || Object.keys(args).length === 0) return [];
   return Object.entries(args).map(([key, value]) => ({
     key,
-    value: String(value),
+    value: typeof value === "string" ? value : JSON.stringify(value),
   }));
+}
+
+function parseValue(value: string): any {
+  // Preserve original JSON types: booleans, numbers, null, objects, arrays
+  try {
+    const parsed = JSON.parse(value);
+    return parsed;
+  } catch {
+    // Not valid JSON — treat as plain string
+    return value;
+  }
 }
 
 function toForcedArgs(items: KeyValue[]): Record<string, any> | null {
   const filtered = items.filter((item) => item.key.trim() !== "");
   if (filtered.length === 0) return null;
-  return Object.fromEntries(filtered.map((item) => [item.key, item.value]));
+  return Object.fromEntries(
+    filtered.map((item) => [item.key, parseValue(item.value)])
+  );
 }
 
 export default function ForcedArgsModal({
