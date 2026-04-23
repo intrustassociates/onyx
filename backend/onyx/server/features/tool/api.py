@@ -160,20 +160,20 @@ def update_tool_forced_args(
 
     Forced arguments are always injected into tool calls, overriding any
     values the LLM provides. Set to null to clear forced arguments.
+
+    Unlike custom tool updates, this endpoint works on ANY tool type
+    (MCP, custom, built-in) since forced_args is a generic capability.
+    Only admins can set forced args — enforced by current_curator_or_admin_user
+    on the admin_router.
     """
-    _get_editable_custom_tool(tool_id, db_session, user)
-    updated_tool = update_tool(
-        tool_id=tool_id,
-        name=None,
-        description=None,
-        openapi_schema=None,
-        custom_headers=None,
-        user_id=None,
-        db_session=db_session,
-        passthrough_auth=None,
-        forced_args=request.forced_args,
-    )
-    return ToolSnapshot.from_model(updated_tool)
+    try:
+        tool = get_tool_by_id(tool_id, db_session)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    tool.forced_args = request.forced_args
+    db_session.commit()
+    return ToolSnapshot.from_model(tool)
 
 
 class ToolStatusUpdateRequest(BaseModel):
