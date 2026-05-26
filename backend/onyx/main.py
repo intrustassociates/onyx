@@ -127,6 +127,12 @@ from onyx.server.manage.voice.websocket_api import router as voice_websocket_rou
 from onyx.server.manage.web_search.api import (
     admin_router as web_search_admin_router,
 )
+from onyx.server.manage.word_action.api import (
+    admin_router as word_action_admin_router,
+)
+from onyx.server.manage.word_action.api import (
+    user_router as sharepoint_action_user_router,
+)
 from onyx.server.metrics.postgres_connection_pool import (
     setup_postgres_connection_pool_metrics,
 )
@@ -507,6 +513,10 @@ def get_application(lifespan_override: Lifespan | None = None) -> FastAPI:
     include_router_with_global_prefix_prepended(application, embedding_router)
     include_router_with_global_prefix_prepended(application, web_search_router)
     include_router_with_global_prefix_prepended(application, web_search_admin_router)
+    include_router_with_global_prefix_prepended(application, word_action_admin_router)
+    include_router_with_global_prefix_prepended(
+        application, sharepoint_action_user_router
+    )
     include_router_with_global_prefix_prepended(application, voice_admin_router)
     include_router_with_global_prefix_prepended(application, voice_router)
     include_router_with_global_prefix_prepended(application, voice_websocket_router)
