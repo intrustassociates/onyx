@@ -97,6 +97,8 @@ class ToolResponse(BaseModel):
         | CustomToolCallSummary
         # This comes from code interpreter, carries generated files
         | PythonToolRichResponse
+        # This comes from the docx generation tool, carries the .docx file_id
+        | GenerateDocxRichResponse
         # If the rich response is a string, this is what's saved to the tool call in the DB
         | str
         | None  # If nothing needs to be persisted outside of the string value passed to the LLM
@@ -200,6 +202,14 @@ class PythonToolRichResponse(BaseModel):
     """Rich response from the Python tool carrying generated files."""
 
     generated_files: list[PythonExecutionFile] = []
+
+
+class GenerateDocxRichResponse(BaseModel):
+    """Rich response from the GenerateDocx tool carrying the generated .docx file."""
+
+    file_id: str
+    filename: str
+    title: str
 
 
 class PythonToolOverrideKwargs(BaseModel):

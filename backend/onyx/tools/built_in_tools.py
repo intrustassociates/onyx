@@ -1,6 +1,9 @@
 from typing import Type
 from typing import Union
 
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    GenerateDocxTool,
+)
 from onyx.tools.tool_implementations.file_reader.file_reader_tool import FileReaderTool
 from onyx.tools.tool_implementations.images.image_generation_tool import (
     ImageGenerationTool,
@@ -29,6 +32,7 @@ BUILT_IN_TOOL_TYPES = Union[
     PythonTool,
     FileReaderTool,
     MemoryTool,
+    GenerateDocxTool,
 ]
 
 BUILT_IN_TOOL_MAP: dict[str, Type[BUILT_IN_TOOL_TYPES]] = {
@@ -40,6 +44,7 @@ BUILT_IN_TOOL_MAP: dict[str, Type[BUILT_IN_TOOL_TYPES]] = {
     PythonTool.__name__: PythonTool,
     FileReaderTool.__name__: FileReaderTool,
     MemoryTool.__name__: MemoryTool,
+    GenerateDocxTool.__name__: GenerateDocxTool,
 }
 
 STOPPING_TOOLS_NAMES: list[str] = [ImageGenerationTool.NAME]
