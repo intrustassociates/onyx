@@ -25,6 +25,7 @@ import CustomToolRenderer from "./renderers/CustomToolRenderer";
 import { FileReaderToolRenderer } from "./timeline/renderers/filereader/FileReaderToolRenderer";
 import { FetchToolRenderer } from "./timeline/renderers/fetch/FetchToolRenderer";
 import { MemoryToolRenderer } from "./timeline/renderers/memory/MemoryToolRenderer";
+import { GenerateDocxRenderer } from "./timeline/renderers/docx/GenerateDocxRenderer";
 import { DeepResearchPlanRenderer } from "./timeline/renderers/deepresearch/DeepResearchPlanRenderer";
 import { ResearchAgentRenderer } from "./timeline/renderers/deepresearch/ResearchAgentRenderer";
 import { WebSearchToolRenderer } from "./timeline/renderers/search/WebSearchToolRenderer";
@@ -82,6 +83,13 @@ function isMemoryToolPacket(packet: Packet) {
   return (
     packet.obj.type === PacketType.MEMORY_TOOL_START ||
     packet.obj.type === PacketType.MEMORY_TOOL_NO_ACCESS
+  );
+}
+
+function isGenerateDocxPacket(packet: Packet) {
+  return (
+    packet.obj.type === PacketType.GENERATE_DOCX_START ||
+    packet.obj.type === PacketType.GENERATE_DOCX_RESULT
   );
 }
 
@@ -154,6 +162,9 @@ export function findRenderer(
   }
   if (groupedPackets.packets.some((packet) => isMemoryToolPacket(packet))) {
     return MemoryToolRenderer;
+  }
+  if (groupedPackets.packets.some((packet) => isGenerateDocxPacket(packet))) {
+    return GenerateDocxRenderer;
   }
   if (groupedPackets.packets.some((packet) => isReasoningPacket(packet))) {
     return ReasoningRenderer;
