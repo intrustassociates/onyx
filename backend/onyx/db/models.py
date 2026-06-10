@@ -3243,6 +3243,54 @@ class InternetContentProvider(Base):
         return f"<InternetContentProvider(name='{self.name}', provider_type='{self.provider_type}')>"
 
 
+class SharePointActionConfig(Base):
+    """Tenant-wide configuration for the Word generation action's SharePoint integration.
+
+    Single-row table per tenant (enforced at application level via word_action_config
+    helpers). Holds the link to a SharePoint Connector Credential Pair plus detection
+    state and runtime preferences.
+    """
+
+    __tablename__ = "sharepoint_action_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cc_pair_id: Mapped[int | None] = mapped_column(
+        ForeignKey("connector_credential_pair.id", ondelete="SET NULL"), nullable=True
+    )
+    write_scopes_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    detected_roles: Mapped[list[str] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    last_scope_check_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Intrust default: force SharePoint save when available so generated docs reingest
+    # back into Onyx KB. Upstream contribution would flip this default to True.
+    allow_download_when_sp_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # Optional pointer to a .docx reference template living in SharePoint that admins
+    # can edit directly. If unset, falls back to Pandoc default styling.
+    template_sp_drive_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    template_sp_item_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_created: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    time_updated: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    cc_pair: Mapped["ConnectorCredentialPair | None"] = relationship(
+        "ConnectorCredentialPair"
+    )
+
+
 class DocumentSet(Base):
     __tablename__ = "document_set"
 

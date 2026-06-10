@@ -43,6 +43,10 @@ export enum PacketType {
   MEMORY_TOOL_DELTA = "memory_tool_delta",
   MEMORY_TOOL_NO_ACCESS = "memory_tool_no_access",
 
+  // Generate Docx (Word) packets
+  GENERATE_DOCX_START = "generate_docx_start",
+  GENERATE_DOCX_RESULT = "generate_docx_result",
+
   // Reasoning packets
   REASONING_START = "reasoning_start",
   REASONING_DELTA = "reasoning_delta",
@@ -155,6 +159,18 @@ export interface PythonToolDelta extends BaseObj {
   stdout: string;
   stderr: string;
   file_ids: string[];
+}
+
+export interface GenerateDocxStart extends BaseObj {
+  type: "generate_docx_start";
+  title: string;
+}
+
+export interface GenerateDocxResult extends BaseObj {
+  type: "generate_docx_result";
+  file_id: string;
+  filename: string;
+  title: string;
 }
 
 export interface ToolCallArgumentDelta extends BaseObj {
@@ -327,6 +343,11 @@ export type PythonToolObj =
   | ToolCallArgumentDelta
   | SectionEnd
   | PacketError;
+export type GenerateDocxObj =
+  | GenerateDocxStart
+  | GenerateDocxResult
+  | SectionEnd
+  | PacketError;
 export type FetchToolObj =
   | FetchToolStart
   | FetchToolUrls
@@ -357,7 +378,8 @@ export type NewToolObj =
   | FetchToolObj
   | CustomToolObj
   | FileReaderToolObj
-  | MemoryToolObj;
+  | MemoryToolObj
+  | GenerateDocxObj;
 
 export type ReasoningObj =
   | ReasoningStart
@@ -441,6 +463,11 @@ export interface ImageGenerationToolPacket {
 export interface PythonToolPacket {
   placement: Placement;
   obj: PythonToolObj;
+}
+
+export interface GenerateDocxPacket {
+  placement: Placement;
+  obj: GenerateDocxObj;
 }
 
 export interface FetchToolPacket {

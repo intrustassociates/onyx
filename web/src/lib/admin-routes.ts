@@ -155,6 +155,12 @@ export const ADMIN_ROUTES = {
     title: "Code Interpreter",
     sidebarLabel: "Code Interpreter",
   },
+  WORD_ACTION: {
+    path: "/admin/configuration/word-action",
+    icon: SvgFileText,
+    title: "Word Generation",
+    sidebarLabel: "Word Generation",
+  },
   INDEX_SETTINGS: {
     path: "/admin/configuration/search",
     icon: SvgSearchMenu,

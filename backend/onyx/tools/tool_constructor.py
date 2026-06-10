@@ -1,3 +1,5 @@
+import time
+from threading import Lock
 from typing import cast
 from uuid import UUID
 
@@ -21,6 +23,7 @@ from onyx.db.models import User
 from onyx.db.oauth_config import get_oauth_config
 from onyx.db.search_settings import get_current_search_settings
 from onyx.db.tools import get_builtin_tool
+from onyx.db.word_action_config import get_sharepoint_action_config
 from onyx.document_index.factory import get_default_document_index
 from onyx.image_gen.interfaces import ImageGenerationProviderCredentials
 from onyx.llm.interfaces import LLM
@@ -33,6 +36,10 @@ from onyx.tools.models import SearchToolUsage
 from onyx.tools.tool_implementations.custom.custom_tool import (
     build_custom_tools_from_openapi_schema_and_headers,
 )
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    fetch_reference_template_bytes,
+)
+from onyx.tools.tool_implementations.docx.generate_docx_tool import GenerateDocxTool
 from onyx.tools.tool_implementations.file_reader.file_reader_tool import FileReaderTool
 from onyx.tools.tool_implementations.images.image_generation_tool import (
     ImageGenerationTool,
@@ -51,6 +58,61 @@ from onyx.utils.headers import header_dict_to_header_list
 from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
+
+
+# Tool construction runs on every chat message; without a cache the template
+# would be re-downloaded from SharePoint per message. Failures (None) are
+# cached too so a broken template doesn't hammer Graph.
+_DOCX_TEMPLATE_CACHE_TTL_SECONDS = 600.0
+_docx_template_cache_lock = Lock()
+_docx_template_cache: dict[tuple[str, str], tuple[bytes | None, float]] = {}
+
+
+def _maybe_fetch_docx_template_bytes(db_session: Session) -> bytes | None:
+    """Resolve the Word reference template from SharePoint if the admin has
+    configured one. Returns ``None`` on any failure so the docx tool still
+    works with Pandoc's default styling.
+    """
+    try:
+        sp_config = get_sharepoint_action_config(db_session)
+        if not sp_config or not sp_config.is_enabled:
+            return None
+        if not (sp_config.template_sp_drive_id and sp_config.template_sp_item_id):
+            return None
+        if not sp_config.cc_pair_id:
+            return None
+
+        cache_key = (sp_config.template_sp_drive_id, sp_config.template_sp_item_id)
+        now = time.time()
+        with _docx_template_cache_lock:
+            cached = _docx_template_cache.get(cache_key)
+            if cached and cached[1] > now:
+                return cached[0]
+
+        cc_pair = sp_config.cc_pair
+        if (
+            cc_pair is None
+            or cc_pair.credential is None
+            or cc_pair.credential.credential_json is None
+        ):
+            return None
+        credential_json = cc_pair.credential.credential_json.get_value(apply_mask=False)
+        if not isinstance(credential_json, dict):
+            return None
+        template_bytes = fetch_reference_template_bytes(
+            credential_json,
+            sp_config.template_sp_drive_id,
+            sp_config.template_sp_item_id,
+        )
+        with _docx_template_cache_lock:
+            _docx_template_cache[cache_key] = (
+                template_bytes,
+                now + _DOCX_TEMPLATE_CACHE_TTL_SECONDS,
+            )
+        return template_bytes
+    except Exception as exc:
+        logger.warning("Could not resolve SharePoint docx template: %s", exc)
+        return None
 
 
 class SearchToolConfig(BaseModel):
@@ -294,6 +356,18 @@ def _construct_tools_impl(
             elif tool_cls.__name__ == PythonTool.__name__:
                 tool_dict[db_tool_model.id] = [
                     PythonTool(tool_id=db_tool_model.id, emitter=emitter)
+                ]
+
+            # Handle Generate Docx (Word) Tool
+            elif tool_cls.__name__ == GenerateDocxTool.__name__:
+                template_bytes = _maybe_fetch_docx_template_bytes(db_session)
+                tool_dict[db_tool_model.id] = [
+                    GenerateDocxTool(
+                        tool_id=db_tool_model.id,
+                        emitter=emitter,
+                        user_id=str(user.id) if user else None,
+                        reference_template_bytes=template_bytes,
+                    )
                 ]
 
             # Handle File Reader Tool
