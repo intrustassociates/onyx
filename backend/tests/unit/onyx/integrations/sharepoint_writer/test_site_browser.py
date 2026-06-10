@@ -17,23 +17,21 @@ class _FakeTokenProvider:
 
 
 def test_list_sites_returns_typed_refs() -> None:
-    payload = {
-        "value": [
-            {
-                "id": "tenant,site-1,web-1",
-                "displayName": "Marketing",
-                "webUrl": "https://t.sharepoint.com/sites/marketing",
-            },
-            {
-                "id": "tenant,site-2,web-2",
-                "name": "legal",
-                "webUrl": "https://t.sharepoint.com/sites/legal",
-            },
-        ]
-    }
+    items = [
+        {
+            "id": "tenant,site-1,web-1",
+            "displayName": "Marketing",
+            "webUrl": "https://t.sharepoint.com/sites/marketing",
+        },
+        {
+            "id": "tenant,site-2,web-2",
+            "name": "legal",
+            "webUrl": "https://t.sharepoint.com/sites/legal",
+        },
+    ]
     with patch(
-        "onyx.integrations.sharepoint_writer.site_browser.graph_get",
-        return_value=payload,
+        "onyx.integrations.sharepoint_writer.site_browser.graph_get_all_pages",
+        return_value=items,
     ):
         sites = list_sites(_FakeTokenProvider())
         assert [s.display_name for s in sites] == ["Marketing", "legal"]
@@ -41,12 +39,10 @@ def test_list_sites_returns_typed_refs() -> None:
 
 
 def test_list_sites_skips_entries_without_id() -> None:
-    payload = {
-        "value": [{"displayName": "no id here"}, {"id": "x", "displayName": "ok"}]
-    }
+    items = [{"displayName": "no id here"}, {"id": "x", "displayName": "ok"}]
     with patch(
-        "onyx.integrations.sharepoint_writer.site_browser.graph_get",
-        return_value=payload,
+        "onyx.integrations.sharepoint_writer.site_browser.graph_get_all_pages",
+        return_value=items,
     ):
         sites = list_sites(_FakeTokenProvider())
         assert len(sites) == 1
@@ -69,8 +65,7 @@ def test_list_drives_returns_typed_refs() -> None:
 
 
 def test_list_folders_filters_files() -> None:
-    """Even with $filter applied server-side, defensively re-check on the
-    client in case the API returns mixed types."""
+    """Children come back mixed (files + folders); only folders survive."""
     items = [
         {"id": "f1", "name": "Folder A", "folder": {"childCount": 2}},
         {"id": "x1", "name": "file.txt"},  # no "folder" key — should be skipped

@@ -12,6 +12,10 @@ from __future__ import annotations
 import base64
 import time
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone
+from email.utils import parsedate_to_datetime
+from threading import Lock
 from typing import Any
 
 import msal
@@ -33,6 +37,27 @@ GRAPH_API_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 class GraphClientError(RuntimeError):
     """Raised when Graph returns a non-retryable error or retries are exhausted."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Retry-After may be delta-seconds or an HTTP-date (RFC 9110)."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
 
 
 def _build_msal_app(bundle: SharePointAuthBundle) -> msal.ConfidentialClientApplication:
@@ -95,6 +120,8 @@ class GraphTokenProvider:
         self._app = _build_msal_app(bundle)
         self._cached_token: str | None = None
         self._token_expires_at: float = 0.0
+        # acquire() is called from parallel permission checks
+        self._token_lock = Lock()
 
     @property
     def graph_host(self) -> str:
@@ -105,22 +132,23 @@ class GraphTokenProvider:
         return f"{self.graph_host}/v1.0"
 
     def acquire(self) -> str:
-        now = time.time()
-        # Refresh 60s before actual expiry to avoid mid-request expiration.
-        if self._cached_token and now < self._token_expires_at - 60:
+        with self._token_lock:
+            now = time.time()
+            # Refresh 60s before actual expiry to avoid mid-request expiration.
+            if self._cached_token and now < self._token_expires_at - 60:
+                return self._cached_token
+
+            result = self._app.acquire_token_for_client(
+                scopes=[f"{self.graph_host}/.default"]
+            )
+            if not result or "access_token" not in result:
+                error = (result or {}).get("error_description", "no token returned")
+                raise GraphClientError(f"MSAL failed to acquire Graph token: {error}")
+
+            self._cached_token = result["access_token"]
+            # MSAL gives expires_in in seconds; default 3300 (~55min) if missing.
+            self._token_expires_at = now + int(result.get("expires_in", 3300))
             return self._cached_token
-
-        result = self._app.acquire_token_for_client(
-            scopes=[f"{self.graph_host}/.default"]
-        )
-        if not result or "access_token" not in result:
-            error = (result or {}).get("error_description", "no token returned")
-            raise GraphClientError(f"MSAL failed to acquire Graph token: {error}")
-
-        self._cached_token = result["access_token"]
-        # MSAL gives expires_in in seconds; default 3300 (~55min) if missing.
-        self._token_expires_at = now + int(result.get("expires_in", 3300))
-        return self._cached_token
 
 
 def _request_with_retry(
@@ -169,8 +197,12 @@ def _request_with_retry(
             resp.status_code in GRAPH_API_RETRYABLE_STATUSES
             and attempt < GRAPH_API_MAX_RETRIES
         ):
-            retry_after = resp.headers.get("Retry-After")
-            wait_s = min(int(retry_after), 60) if retry_after else min(2**attempt, 60)
+            retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+            wait_s = (
+                min(retry_after, 60.0)
+                if retry_after is not None
+                else float(min(2**attempt, 60))
+            )
             logger.warning(
                 "Graph %s %s returned %s, retrying in %ss",
                 method,
@@ -197,7 +229,8 @@ def graph_get(
     resp = _request_with_retry("GET", url, token_provider, params=params)
     if not resp.ok:
         raise GraphClientError(
-            f"Graph GET {url} -> {resp.status_code}: {resp.text[:500]}"
+            f"Graph GET {url} -> {resp.status_code}: {resp.text[:500]}",
+            status_code=resp.status_code,
         )
     return resp.json()
 
@@ -236,7 +269,8 @@ def graph_put_bytes(
     )
     if not resp.ok:
         raise GraphClientError(
-            f"Graph PUT {url} -> {resp.status_code}: {resp.text[:500]}"
+            f"Graph PUT {url} -> {resp.status_code}: {resp.text[:500]}",
+            status_code=resp.status_code,
         )
     return resp.json()
 
@@ -255,7 +289,8 @@ def graph_post_json(
     )
     if not resp.ok:
         raise GraphClientError(
-            f"Graph POST {url} -> {resp.status_code}: {resp.text[:500]}"
+            f"Graph POST {url} -> {resp.status_code}: {resp.text[:500]}",
+            status_code=resp.status_code,
         )
     return resp.json() if resp.content else {}
 

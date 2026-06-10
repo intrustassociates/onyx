@@ -1,3 +1,5 @@
+import time
+from threading import Lock
 from typing import cast
 from uuid import UUID
 
@@ -58,6 +60,14 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 
+# Tool construction runs on every chat message; without a cache the template
+# would be re-downloaded from SharePoint per message. Failures (None) are
+# cached too so a broken template doesn't hammer Graph.
+_DOCX_TEMPLATE_CACHE_TTL_SECONDS = 600.0
+_docx_template_cache_lock = Lock()
+_docx_template_cache: dict[tuple[str, str], tuple[bytes | None, float]] = {}
+
+
 def _maybe_fetch_docx_template_bytes(db_session: Session) -> bytes | None:
     """Resolve the Word reference template from SharePoint if the admin has
     configured one. Returns ``None`` on any failure so the docx tool still
@@ -71,17 +81,35 @@ def _maybe_fetch_docx_template_bytes(db_session: Session) -> bytes | None:
             return None
         if not sp_config.cc_pair_id:
             return None
+
+        cache_key = (sp_config.template_sp_drive_id, sp_config.template_sp_item_id)
+        now = time.time()
+        with _docx_template_cache_lock:
+            cached = _docx_template_cache.get(cache_key)
+            if cached and cached[1] > now:
+                return cached[0]
+
         cc_pair = sp_config.cc_pair
-        if cc_pair is None or cc_pair.credential is None:
+        if (
+            cc_pair is None
+            or cc_pair.credential is None
+            or cc_pair.credential.credential_json is None
+        ):
             return None
         credential_json = cc_pair.credential.credential_json.get_value(apply_mask=False)
         if not isinstance(credential_json, dict):
             return None
-        return fetch_reference_template_bytes(
+        template_bytes = fetch_reference_template_bytes(
             credential_json,
             sp_config.template_sp_drive_id,
             sp_config.template_sp_item_id,
         )
+        with _docx_template_cache_lock:
+            _docx_template_cache[cache_key] = (
+                template_bytes,
+                now + _DOCX_TEMPLATE_CACHE_TTL_SECONDS,
+            )
+        return template_bytes
     except Exception as exc:
         logger.warning("Could not resolve SharePoint docx template: %s", exc)
         return None
@@ -337,6 +365,7 @@ def _construct_tools_impl(
                     GenerateDocxTool(
                         tool_id=db_tool_model.id,
                         emitter=emitter,
+                        user_id=str(user.id) if user else None,
                         reference_template_bytes=template_bytes,
                     )
                 ]

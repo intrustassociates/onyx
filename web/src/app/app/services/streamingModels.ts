@@ -465,6 +465,11 @@ export interface PythonToolPacket {
   obj: PythonToolObj;
 }
 
+export interface GenerateDocxPacket {
+  placement: Placement;
+  obj: GenerateDocxObj;
+}
+
 export interface FetchToolPacket {
   placement: Placement;
   obj: FetchToolObj;

@@ -2,29 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  GenerateDocxPacket,
   GenerateDocxResult,
   GenerateDocxStart,
   PacketType,
 } from "@/app/app/services/streamingModels";
-import {
-  MessageRenderer,
-  RenderType,
-} from "@/app/app/message/messageComponents/interfaces";
+import { MessageRenderer } from "@/app/app/message/messageComponents/interfaces";
 import { SvgDownload, SvgFileText, SvgUploadCloud } from "@opal/icons";
 import { Button } from "@opal/components";
 import Text from "@/refresh-components/texts/Text";
 import {
   downloadUrlForFileId,
+  fetchArtifactStatus,
   fetchCapabilities,
   type ArtifactCapabilityView,
 } from "@/app/app/message/messageComponents/timeline/renderers/docx/svc";
 import SharePointSaveModal from "@/app/app/message/messageComponents/timeline/renderers/docx/SharePointSaveModal";
 
 
-export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
+export const GenerateDocxRenderer: MessageRenderer<GenerateDocxPacket, {}> = ({
   packets,
   onComplete,
-  renderType,
   children,
 }) => {
   const start = useMemo(
@@ -55,6 +53,9 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
     null
   );
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
+  // The file_store entry was deleted/expired and was never saved — nothing
+  // actionable left to offer.
+  const [artifactMissing, setArtifactMissing] = useState(false);
   const [uploadFailed, setUploadFailed] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -72,6 +73,17 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
             write_scopes_available: false,
             allow_download_when_sp_available: true,
           });
+      });
+    // Restore post-upload state after a page reload: the packets only say
+    // "generated", but the backend knows whether it was saved already.
+    fetchArtifactStatus(result.file_id)
+      .then((status) => {
+        if (!alive) return;
+        if (status.saved_web_url) setSavedUrl(status.saved_web_url);
+        else if (!status.exists) setArtifactMissing(true);
+      })
+      .catch(() => {
+        // Leave default state; buttons will surface errors on click.
       });
     return () => {
       alive = false;
@@ -131,6 +143,14 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
               <Text mainUiBody text03>
                 Saved — Onyx will reindex after the next SharePoint sync.
               </Text>
+            ) : artifactMissing ? (
+              <Text mainUiBody text03>
+                This document is no longer available.
+              </Text>
+            ) : uploadFailed ? (
+              <Text mainUiBody text03>
+                Upload failed. Retry or download the file instead.
+              </Text>
             ) : (
               <Text mainUiBody text03>
                 Generated. Choose where to save it.
@@ -147,7 +167,7 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
             >
               Open in SharePoint
             </a>
-          ) : (
+          ) : artifactMissing ? null : (
             <>
               {sharePointAvailable && (
                 <Button
@@ -156,6 +176,15 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
                   onClick={() => setModalOpen(true)}
                 >
                   Save to SharePoint
+                </Button>
+              )}
+              {uploadFailed && (
+                <Button
+                  prominence="secondary"
+                  icon={SvgUploadCloud}
+                  onClick={() => setModalOpen(true)}
+                >
+                  Retry save
                 </Button>
               )}
               {showDownload && (
@@ -179,23 +208,14 @@ export const GenerateDocxRenderer: MessageRenderer<any, {}> = ({
           onClose={() => setModalOpen(false)}
           onSaved={(url) => {
             setSavedUrl(url);
+            setUploadFailed(false);
             setModalOpen(false);
           }}
+          onUploadError={() => setUploadFailed(true)}
         />
       )}
     </div>
   );
-
-  if (renderType === RenderType.FULL) {
-    return children([
-      {
-        icon: SvgFileText,
-        status,
-        content,
-        supportsCollapsible: true,
-      },
-    ]);
-  }
 
   return children([
     {

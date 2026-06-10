@@ -10,6 +10,7 @@ Reference:
 from __future__ import annotations
 
 import re
+import time
 from urllib.parse import quote
 
 import requests
@@ -31,6 +32,8 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 # must use createUploadSession + chunked PATCH.
 SIMPLE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024  # 4 MB
 UPLOAD_CHUNK_BYTES = 5 * 1024 * 1024  # 5 MB — multiple of 320 KiB recommended
+CHUNK_MAX_ATTEMPTS = 3
+CHUNK_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
 _FILENAME_SAFE = re.compile(r'[\\/:*?"<>|\r\n\t]+')
@@ -109,17 +112,7 @@ def _chunked_upload(
             "Content-Length": str(len(chunk)),
             "Content-Range": f"bytes {offset}-{end}/{total}",
         }
-        # The session uploadUrl is pre-authenticated — no bearer header.
-        resp = requests.put(
-            upload_url,
-            headers=headers,
-            data=chunk,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        if resp.status_code not in (200, 201, 202):
-            raise GraphClientError(
-                f"Upload chunk {offset}-{end} -> {resp.status_code}: {resp.text[:300]}"
-            )
+        resp = _put_chunk_with_retry(upload_url, headers, chunk, offset, end)
         if resp.content:
             try:
                 last_response = resp.json()
@@ -128,6 +121,59 @@ def _chunked_upload(
         offset = end + 1
 
     return last_response
+
+
+def _put_chunk_with_retry(
+    upload_url: str,
+    headers: dict[str, str],
+    chunk: bytes,
+    offset: int,
+    end: int,
+) -> requests.Response:
+    """PUT one byte range, retrying transient failures.
+
+    Re-PUTting the same range is safe: the session only commits once the final
+    range lands. The session uploadUrl is pre-authenticated — no bearer header.
+    """
+    for attempt in range(CHUNK_MAX_ATTEMPTS):
+        try:
+            resp = requests.put(
+                upload_url,
+                headers=headers,
+                data=chunk,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            if attempt >= CHUNK_MAX_ATTEMPTS - 1:
+                raise GraphClientError(
+                    f"Upload chunk {offset}-{end} failed after "
+                    f"{CHUNK_MAX_ATTEMPTS} attempts: {exc}"
+                ) from exc
+            time.sleep(2**attempt)
+            continue
+
+        if resp.status_code in (200, 201, 202):
+            return resp
+        if (
+            resp.status_code in CHUNK_RETRYABLE_STATUSES
+            and attempt < CHUNK_MAX_ATTEMPTS - 1
+        ):
+            logger.warning(
+                "Upload chunk %s-%s returned %s, retrying",
+                offset,
+                end,
+                resp.status_code,
+            )
+            time.sleep(2**attempt)
+            continue
+        raise GraphClientError(
+            f"Upload chunk {offset}-{end} -> {resp.status_code}: {resp.text[:300]}",
+            status_code=resp.status_code,
+        )
+
+    raise GraphClientError(
+        f"Upload chunk {offset}-{end} exhausted {CHUNK_MAX_ATTEMPTS} attempts"
+    )
 
 
 def upload_docx(

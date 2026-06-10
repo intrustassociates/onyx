@@ -128,6 +128,74 @@ def test_upload_docx_uses_session_for_large_files() -> None:
         assert mock_put.call_count >= 1
 
 
+def test_chunked_upload_retries_transient_chunk_failure() -> None:
+    large_bytes = b"x" * (SIMPLE_UPLOAD_MAX_BYTES + 10)
+    session_response = {"uploadUrl": "https://upload.example.com/sess?key=abc"}
+
+    flaky = MagicMock()
+    flaky.status_code = 503
+    flaky.text = "service unavailable"
+
+    success = MagicMock()
+    success.status_code = 201
+    success.content = b'{"id":"new-id","webUrl":"https://w","name":"f.docx"}'
+    success.json.return_value = {
+        "id": "new-id",
+        "webUrl": "https://w",
+        "name": "f.docx",
+    }
+
+    with (
+        patch(
+            "onyx.integrations.sharepoint_writer.uploader.graph_post_json",
+            return_value=session_response,
+        ),
+        patch(
+            "onyx.integrations.sharepoint_writer.uploader.requests.put",
+            side_effect=[flaky, success],
+        ) as mock_put,
+        patch("onyx.integrations.sharepoint_writer.uploader.time.sleep"),
+    ):
+        result = upload_docx(
+            _FakeTokenProvider(),
+            drive_id="drive-1",
+            folder_id="folder-1",
+            filename="f.docx",
+            content_bytes=large_bytes,
+        )
+        assert result.item_id == "new-id"
+        assert mock_put.call_count == 2  # one retry, same byte range
+
+
+def test_chunked_upload_raises_on_non_retryable_chunk_status() -> None:
+    large_bytes = b"x" * (SIMPLE_UPLOAD_MAX_BYTES + 10)
+    session_response = {"uploadUrl": "https://upload.example.com/sess?key=abc"}
+
+    denied = MagicMock()
+    denied.status_code = 403
+    denied.text = "forbidden"
+
+    with (
+        patch(
+            "onyx.integrations.sharepoint_writer.uploader.graph_post_json",
+            return_value=session_response,
+        ),
+        patch(
+            "onyx.integrations.sharepoint_writer.uploader.requests.put",
+            return_value=denied,
+        ),
+    ):
+        with pytest.raises(GraphClientError, match="403") as exc_info:
+            upload_docx(
+                _FakeTokenProvider(),
+                drive_id="drive-1",
+                folder_id="folder-1",
+                filename="f.docx",
+                content_bytes=large_bytes,
+            )
+        assert exc_info.value.status_code == 403
+
+
 def test_download_item_bytes_returns_content() -> None:
     resp = MagicMock()
     resp.ok = True

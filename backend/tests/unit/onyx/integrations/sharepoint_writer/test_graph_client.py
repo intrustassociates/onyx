@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 import requests
 
+from onyx.integrations.sharepoint_writer.graph_client import _parse_retry_after
 from onyx.integrations.sharepoint_writer.graph_client import (
     auth_bundle_from_credential_json,
 )
@@ -88,8 +89,27 @@ def test_graph_get_raises_on_non_ok_after_retries() -> None:
         "onyx.integrations.sharepoint_writer.graph_client.requests.request",
         return_value=fake_resp,
     ):
-        with pytest.raises(GraphClientError, match="404"):
+        with pytest.raises(GraphClientError, match="404") as exc_info:
             graph_get("https://graph.microsoft.com/v1.0/sites", _FakeTokenProvider())
+    # Callers (e.g. permission_check 404 handling) rely on the structured code
+    assert exc_info.value.status_code == 404
+
+
+def test_parse_retry_after_delta_seconds() -> None:
+    assert _parse_retry_after("12") == 12.0
+    assert _parse_retry_after("0") == 0.0
+
+
+def test_parse_retry_after_http_date() -> None:
+    # RFC 9110 also allows an HTTP-date; a date in the past clamps to 0
+    parsed = _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT")
+    assert parsed == 0.0
+
+
+def test_parse_retry_after_garbage_returns_none() -> None:
+    assert _parse_retry_after(None) is None
+    assert _parse_retry_after("") is None
+    assert _parse_retry_after("soon-ish") is None
 
 
 def test_graph_get_retries_on_429_then_succeeds() -> None:

@@ -32,11 +32,24 @@ export interface UploadResultView {
   filename: string;
 }
 
+export interface ArtifactStatusView {
+  exists: boolean;
+  saved_web_url: string | null;
+}
+
 const ROOT = "/api/sharepoint-action";
 
 export async function fetchCapabilities(): Promise<ArtifactCapabilityView> {
   const r = await fetch(`${ROOT}/capabilities`);
   if (!r.ok) throw new Error(`GET capabilities -> ${r.status}`);
+  return r.json();
+}
+
+export async function fetchArtifactStatus(
+  fileId: string
+): Promise<ArtifactStatusView> {
+  const r = await fetch(`${ROOT}/artifact/${encodeURIComponent(fileId)}`);
+  if (!r.ok) throw new Error(`GET artifact status -> ${r.status}`);
   return r.json();
 }
 

@@ -16,6 +16,7 @@ from onyx.configs.constants import DocumentSource
 from onyx.db.connector_credential_pair import get_connector_credential_pair_from_id
 from onyx.db.engine.sql_engine import get_session
 from onyx.db.enums import Permission
+from onyx.db.file_record import get_filerecord_by_file_id_optional
 from onyx.db.models import Connector
 from onyx.db.models import ConnectorCredentialPair
 from onyx.db.models import User
@@ -29,6 +30,7 @@ from onyx.integrations.sharepoint_writer.graph_client import (
 )
 from onyx.integrations.sharepoint_writer.graph_client import GraphClientError
 from onyx.integrations.sharepoint_writer.graph_client import GraphTokenProvider
+from onyx.integrations.sharepoint_writer.permission_check import get_user_group_ids
 from onyx.integrations.sharepoint_writer.permission_check import user_has_write_access
 from onyx.integrations.sharepoint_writer.scope_detection import detect_write_scopes
 from onyx.integrations.sharepoint_writer.site_browser import list_drives
@@ -36,6 +38,7 @@ from onyx.integrations.sharepoint_writer.site_browser import list_folders
 from onyx.integrations.sharepoint_writer.site_browser import list_sites
 from onyx.integrations.sharepoint_writer.uploader import upload_docx
 from onyx.server.manage.word_action.models import ArtifactCapabilityView
+from onyx.server.manage.word_action.models import ArtifactStatusView
 from onyx.server.manage.word_action.models import DriveView
 from onyx.server.manage.word_action.models import FolderUploadRequest
 from onyx.server.manage.word_action.models import FolderView
@@ -45,10 +48,13 @@ from onyx.server.manage.word_action.models import SharePointActionConfigView
 from onyx.server.manage.word_action.models import SharePointCcPairOption
 from onyx.server.manage.word_action.models import SiteView
 from onyx.server.manage.word_action.models import UploadResultView
-from onyx.utils.logger import setup_logger
-
-
-logger = setup_logger()
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    ARTIFACT_SAVED_URL_KEY,
+)
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    is_docx_artifact_owned_by,
+)
+from onyx.utils.threadpool_concurrency import run_functions_tuples_in_parallel
 
 
 admin_router = APIRouter(prefix="/admin/word-action")
@@ -81,7 +87,11 @@ def _build_token_provider_or_400(
     cc_pair = get_connector_credential_pair_from_id(
         db_session=db_session, cc_pair_id=cc_pair_id, eager_load_credential=True
     )
-    if cc_pair is None or cc_pair.credential is None:
+    if (
+        cc_pair is None
+        or cc_pair.credential is None
+        or cc_pair.credential.credential_json is None
+    ):
         raise HTTPException(
             status_code=400, detail="SharePoint credential pair not found."
         )
@@ -278,23 +288,56 @@ def get_folders(
             status_code=502, detail=f"SharePoint listing failed: {exc}"
         ) from exc
 
-    results: list[FolderView] = []
-    for folder in folders:
-        can_write = user_has_write_access(
-            token_provider,
-            user_email=user_email,
-            drive_id=drive_id,
-            item_id=folder.id,
+    if not folders:
+        return []
+
+    # Warm the user-identity caches once so the parallel per-folder checks
+    # below only fetch item permissions.
+    try:
+        get_user_group_ids(token_provider, user_email)
+    except GraphClientError:
+        pass  # each per-folder check degrades to can_write=False on its own
+    can_writes: list[bool] = run_functions_tuples_in_parallel(
+        [
+            (user_has_write_access, (token_provider, user_email, drive_id, folder.id))
+            for folder in folders
+        ],
+        max_workers=8,
+    )
+    return [
+        FolderView(
+            id=folder.id,
+            name=folder.name,
+            web_url=folder.web_url,
+            can_write=can_write,
         )
-        results.append(
-            FolderView(
-                id=folder.id,
-                name=folder.name,
-                web_url=folder.web_url,
-                can_write=can_write,
-            )
-        )
-    return results
+        for folder, can_write in zip(folders, can_writes)
+    ]
+
+
+@user_router.get("/artifact/{file_id}", response_model=ArtifactStatusView)
+def get_artifact_status(
+    file_id: str,
+    user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
+    db_session: Session = Depends(get_session),
+) -> ArtifactStatusView:
+    """Lets the chat card restore its state after a reload (saved vs pending).
+
+    Reports ``exists=False`` for records the user doesn't own so the endpoint
+    can't be used to probe which file ids exist.
+    """
+    record = get_filerecord_by_file_id_optional(file_id=file_id, db_session=db_session)
+    if record is None or not is_docx_artifact_owned_by(
+        record.file_metadata, record.file_type, str(user.id)
+    ):
+        return ArtifactStatusView(exists=False, saved_web_url=None)
+    metadata = (
+        dict(record.file_metadata) if isinstance(record.file_metadata, dict) else {}
+    )
+    saved_url = metadata.get(ARTIFACT_SAVED_URL_KEY)
+    return ArtifactStatusView(
+        exists=True, saved_web_url=saved_url if isinstance(saved_url, str) else None
+    )
 
 
 @user_router.post("/upload", response_model=UploadResultView)
@@ -305,6 +348,26 @@ def upload_to_sharepoint(
 ) -> UploadResultView:
     user_email = _require_user_email(user)
     token_provider = _get_token_provider_for_active_config(db_session)
+
+    # Only docx artifacts generated by this user's generate_docx calls may be
+    # uploaded. 404 (not 403) for both missing and not-owned records, so the
+    # endpoint doesn't reveal which file ids exist in the store.
+    record = get_filerecord_by_file_id_optional(
+        file_id=payload.file_id, db_session=db_session
+    )
+    if record is None or not is_docx_artifact_owned_by(
+        record.file_metadata, record.file_type, str(user.id)
+    ):
+        raise HTTPException(status_code=404, detail="No such generated document.")
+
+    metadata = (
+        dict(record.file_metadata) if isinstance(record.file_metadata, dict) else {}
+    )
+    if metadata.get(ARTIFACT_SAVED_URL_KEY):
+        raise HTTPException(
+            status_code=409,
+            detail="This document was already saved to SharePoint.",
+        )
 
     # Defense in depth: even though the picker filters folders, re-validate
     # write permission here so a malicious client can't bypass via direct API.
@@ -321,7 +384,6 @@ def upload_to_sharepoint(
 
     file_store = get_default_file_store()
     try:
-        file_record = file_store.read_file_record(payload.file_id)
         body_io = file_store.read_file(payload.file_id, mode="b")
     except Exception as exc:
         raise HTTPException(
@@ -329,7 +391,7 @@ def upload_to_sharepoint(
         ) from exc
 
     content_bytes = body_io.read() if hasattr(body_io, "read") else bytes(body_io)
-    filename = file_record.display_name or "document.docx"
+    filename = record.display_name or "document.docx"
 
     try:
         result = upload_docx(
@@ -345,12 +407,13 @@ def upload_to_sharepoint(
         ) from exc
 
     # The .docx lives canonically in SharePoint now; the next ingestion cycle
-    # will index it back into Onyx. Clean up the file_store entry to avoid
-    # double storage. Best-effort — if cleanup fails, the file is harmless.
-    try:
-        file_store.delete_file(payload.file_id)
-    except Exception as exc:
-        logger.warning("Could not delete file_store entry %s: %s", payload.file_id, exc)
+    # will index it back into Onyx. Keep the file_store entry but mark it as
+    # saved — the chat card uses this (via /artifact/{file_id}) to restore the
+    # "Saved to SharePoint" state after a page reload, and the 409 above stops
+    # duplicate uploads.
+    metadata[ARTIFACT_SAVED_URL_KEY] = result.web_url
+    record.file_metadata = metadata
+    db_session.commit()
 
     return UploadResultView(
         item_id=result.item_id,

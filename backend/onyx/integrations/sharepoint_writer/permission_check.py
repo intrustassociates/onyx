@@ -39,12 +39,15 @@ _GROUP_MEMBERSHIP_TTL = 300.0  # 5 min — memberships change rarely
 _PERMISSION_TTL = 60.0  # 60 s — fine-grained, matches picker session
 
 
-# Module-level caches. Keyed by tenant via the token's graph host so different
-# tenants don't poison each other. Process-local; cleared on restart.
+# Module-level caches, keyed by graph host + identifiers. A single Onyx
+# deployment talks to one Azure tenant, so the host prefix only matters for
+# sovereign-cloud setups. Process-local; cleared on restart.
 _group_cache_lock = Lock()
 _group_cache: dict[tuple[str, str], tuple[frozenset[str], float]] = {}
 _perm_cache_lock = Lock()
 _perm_cache: dict[tuple[str, str, str, str], tuple[bool, float]] = {}
+_user_id_cache_lock = Lock()
+_user_id_cache: dict[tuple[str, str], tuple[str | None, float]] = {}
 
 
 def _resolve_user_id(token_provider: GraphTokenProvider, email: str) -> str | None:
@@ -56,10 +59,27 @@ def _resolve_user_id(token_provider: GraphTokenProvider, email: str) -> str | No
     try:
         payload = graph_get(url, token_provider)
     except GraphClientError as exc:
-        if "404" in str(exc):
+        if exc.status_code == 404:
             return None
         raise
     return payload.get("id")
+
+
+def _resolve_user_id_cached(
+    token_provider: GraphTokenProvider, email: str
+) -> str | None:
+    """Cached email → AAD object id, so checking N folders costs one lookup."""
+    cache_key = (token_provider.graph_host, email.lower())
+    now = time.time()
+    with _user_id_cache_lock:
+        cached = _user_id_cache.get(cache_key)
+        if cached and cached[1] > now:
+            return cached[0]
+
+    user_id = _resolve_user_id(token_provider, email)
+    with _user_id_cache_lock:
+        _user_id_cache[cache_key] = (user_id, now + _GROUP_MEMBERSHIP_TTL)
+    return user_id
 
 
 def _fetch_user_group_ids(
@@ -83,7 +103,7 @@ def get_user_group_ids(
         if cached and cached[1] > now:
             return cached[0]
 
-    user_id = _resolve_user_id(token_provider, user_email)
+    user_id = _resolve_user_id_cached(token_provider, user_email)
     if not user_id:
         logger.info("SharePoint write check: user %s not found in AAD", user_email)
         groups: frozenset[str] = frozenset()
@@ -93,16 +113,6 @@ def get_user_group_ids(
     with _group_cache_lock:
         _group_cache[cache_key] = (groups, now + _GROUP_MEMBERSHIP_TTL)
     return groups
-
-
-def _user_id_only(token_provider: GraphTokenProvider, email: str) -> str | None:
-    """Same as _resolve_user_id but routed through the same cache key
-    that ``get_user_group_ids`` uses, so a repeated call doesn't hit Graph again
-    when the only piece needed is the AAD id of the user.
-
-    Slightly redundant with the group cache, but cheap.
-    """
-    return _resolve_user_id(token_provider, email)
 
 
 def _permissions_grant_write(
@@ -167,7 +177,7 @@ def user_has_write_access(
             return cached[0]
 
     try:
-        user_id = _user_id_only(token_provider, user_email)
+        user_id = _resolve_user_id_cached(token_provider, user_email)
         user_groups = get_user_group_ids(token_provider, user_email)
         url = (
             f"{token_provider.graph_base}/drives/{drive_id}/items/"
@@ -183,7 +193,9 @@ def user_has_write_access(
             item_id,
             exc,
         )
-        granted = False
+        # Don't cache transient failures — the next call should retry Graph
+        # instead of pinning the folder read-only for the TTL window.
+        return False
 
     with _perm_cache_lock:
         _perm_cache[cache_key] = (granted, now + _PERMISSION_TTL)
@@ -196,3 +208,5 @@ def invalidate_caches() -> None:
         _group_cache.clear()
     with _perm_cache_lock:
         _perm_cache.clear()
+    with _user_id_cache_lock:
+        _user_id_cache.clear()

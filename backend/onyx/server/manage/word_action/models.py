@@ -73,6 +73,13 @@ class UploadResultView(BaseModel):
     filename: str
 
 
+class ArtifactStatusView(BaseModel):
+    """Current state of a generated artifact, for restoring the chat card."""
+
+    exists: bool
+    saved_web_url: str | None
+
+
 class ArtifactCapabilityView(BaseModel):
     """What the frontend needs to decide which artifact buttons to render.
 

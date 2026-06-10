@@ -21,9 +21,9 @@ def list_sites(
 ) -> list[SiteRef]:
     url = f"{token_provider.graph_base}/sites"
     params = {"search": query, "$select": "id,displayName,name,webUrl", "$top": "200"}
-    payload = graph_get(url, token_provider, params=params)
+    items = graph_get_all_pages(url, token_provider, params=params, max_pages=10)
     sites: list[SiteRef] = []
-    for raw in payload.get("value", []):
+    for raw in items:
         site_id = raw.get("id")
         if not site_id:
             continue
@@ -72,9 +72,11 @@ def list_folders(
             f"{token_provider.graph_base}/drives/{drive_id}/items/"
             f"{quote(parent_id, safe='')}/children"
         )
+    # No ``$filter=folder ne null`` here: Graph frequently rejects $filter on
+    # driveItem facet properties with 400. Files are filtered out client-side
+    # below instead.
     params = {
         "$select": "id,name,webUrl,folder,parentReference",
-        "$filter": "folder ne null",
         "$top": "200",
     }
     items = graph_get_all_pages(url, token_provider, params=params, max_pages=10)

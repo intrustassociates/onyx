@@ -22,6 +22,9 @@ export interface SharePointSaveModalProps {
   filename: string;
   onClose: () => void;
   onSaved: (webUrl: string) => void;
+  /** Called when an upload attempt fails, so the parent card can offer a
+   * Download escape hatch. The modal stays open for retries. */
+  onUploadError?: (message: string) => void;
 }
 
 
@@ -30,6 +33,7 @@ export default function SharePointSaveModal({
   filename,
   onClose,
   onSaved,
+  onUploadError,
 }: SharePointSaveModalProps) {
   const [sites, setSites] = useState<SiteView[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
@@ -101,11 +105,21 @@ export default function SharePointSaveModal({
       toast.success(`Saved as ${result.filename}`);
       onSaved(result.web_url);
     } catch (err) {
-      toast.error(`Upload failed: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      toast.error(`Upload failed: ${message}`);
+      onUploadError?.(message);
     } finally {
       setSaving(false);
     }
   }
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
     <div

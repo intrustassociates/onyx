@@ -131,7 +131,9 @@ def test_user_has_write_access_user_not_in_aad_returns_false() -> None:
     with (
         patch(
             "onyx.integrations.sharepoint_writer.permission_check.graph_get",
-            side_effect=GraphClientError("Graph GET https://... -> 404: not found"),
+            side_effect=GraphClientError(
+                "Graph GET https://... -> 404: not found", status_code=404
+            ),
         ),
         patch(
             "onyx.integrations.sharepoint_writer.permission_check.graph_get_all_pages",
@@ -165,6 +167,39 @@ def test_user_has_write_access_swallows_graph_errors() -> None:
             item_id="folder-1",
         )
         assert granted is False
+
+
+def test_user_has_write_access_does_not_cache_transient_errors() -> None:
+    """A Graph failure returns False but must not pin the folder read-only."""
+    with (
+        patch(
+            "onyx.integrations.sharepoint_writer.permission_check.graph_get",
+            return_value={"id": "user-abc"},
+        ),
+        patch(
+            "onyx.integrations.sharepoint_writer.permission_check.graph_get_all_pages",
+            side_effect=[
+                [{"id": "g1"}],  # group memberships (cached after this)
+                GraphClientError("503 transient", status_code=503),  # permissions
+                [{"roles": ["write"], "grantedToV2": {"user": {"id": "user-abc"}}}],
+            ],
+        ),
+    ):
+        first = user_has_write_access(
+            _FakeTokenProvider(),
+            user_email="alice@tenant.com",
+            drive_id="d1",
+            item_id="f1",
+        )
+        assert first is False
+
+        second = user_has_write_access(
+            _FakeTokenProvider(),
+            user_email="alice@tenant.com",
+            drive_id="d1",
+            item_id="f1",
+        )
+        assert second is True
 
 
 def test_user_has_write_access_caches_repeated_calls() -> None:

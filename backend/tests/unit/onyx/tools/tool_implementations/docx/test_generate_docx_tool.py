@@ -10,7 +10,14 @@ from onyx.server.query_and_chat.streaming_models import GenerateDocxResult
 from onyx.server.query_and_chat.streaming_models import GenerateDocxStart
 from onyx.tools.models import GenerateDocxRichResponse
 from onyx.tools.models import ToolCallException
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    build_artifact_metadata,
+)
+from onyx.tools.tool_implementations.docx.generate_docx_tool import DOCX_MIME
 from onyx.tools.tool_implementations.docx.generate_docx_tool import GenerateDocxTool
+from onyx.tools.tool_implementations.docx.generate_docx_tool import (
+    is_docx_artifact_owned_by,
+)
 
 
 @pytest.fixture
@@ -76,6 +83,63 @@ def test_tool_run_happy_path_saves_to_file_store(tool: GenerateDocxTool) -> None
         save_kwargs["file_type"]
         == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+    # No user_id on the tool → metadata carries only the generator marker
+    assert save_kwargs["file_metadata"] == {"generator": "generate_docx"}
+
+
+def test_tool_run_stamps_owner_when_user_id_given(fake_emitter: MagicMock) -> None:
+    tool = GenerateDocxTool(tool_id=1, emitter=fake_emitter, user_id="user-123")
+    fake_store = MagicMock()
+    fake_store.save_file.return_value = "fid"
+    with (
+        patch(
+            "onyx.tools.tool_implementations.docx.generate_docx_tool.get_default_file_store",
+            return_value=fake_store,
+        ),
+        patch(
+            "onyx.tools.tool_implementations.docx.generate_docx_tool.build_docx_from_markdown",
+            return_value=b"PK",
+        ),
+    ):
+        tool.run(
+            placement=Placement(turn_index=0),
+            override_kwargs=None,
+            title="Doc",
+            content="body",
+        )
+    save_kwargs = fake_store.save_file.call_args.kwargs
+    assert save_kwargs["file_metadata"] == {
+        "generator": "generate_docx",
+        "owner_user_id": "user-123",
+    }
+
+
+def test_build_artifact_metadata_without_user_id_omits_owner() -> None:
+    assert build_artifact_metadata(None) == {"generator": "generate_docx"}
+
+
+def test_is_docx_artifact_owned_by_matrix() -> None:
+    owned = build_artifact_metadata("user-1")
+    ownerless = build_artifact_metadata(None)
+
+    # Wrong MIME type → never an artifact
+    assert is_docx_artifact_owned_by(owned, "text/plain", "user-1") is False
+    # Missing/non-dict metadata → reject
+    assert is_docx_artifact_owned_by(None, DOCX_MIME, "user-1") is False
+    assert is_docx_artifact_owned_by("not-a-dict", DOCX_MIME, "user-1") is False
+    # Missing generator marker → reject (arbitrary file_store entries)
+    assert is_docx_artifact_owned_by({}, DOCX_MIME, "user-1") is False
+    assert (
+        is_docx_artifact_owned_by({"generator": "other"}, DOCX_MIME, "user-1") is False
+    )
+    # Owner match → allow
+    assert is_docx_artifact_owned_by(owned, DOCX_MIME, "user-1") is True
+    # Owner mismatch → reject (the IDOR case)
+    assert is_docx_artifact_owned_by(owned, DOCX_MIME, "user-2") is False
+    assert is_docx_artifact_owned_by(owned, DOCX_MIME, None) is False
+    # Ownerless artifact (auth-disabled deployments) → any user may act
+    assert is_docx_artifact_owned_by(ownerless, DOCX_MIME, "user-2") is True
+    assert is_docx_artifact_owned_by(ownerless, DOCX_MIME, None) is True
 
 
 def test_tool_run_emits_start_and_result_packets(
