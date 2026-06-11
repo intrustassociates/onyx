@@ -17,6 +17,7 @@ import {
   SvgUser,
   SvgCircle,
   SvgBookOpen,
+  SvgFileText,
 } from "@opal/icons";
 
 /**
@@ -106,6 +107,8 @@ export function getToolName(packets: Packet[]): string {
     case PacketType.MEMORY_TOOL_START:
     case PacketType.MEMORY_TOOL_NO_ACCESS:
       return "Memory";
+    case PacketType.GENERATE_DOCX_START:
+      return "Word Document";
     default:
       return "Tool";
   }
@@ -143,6 +146,8 @@ export function getToolIcon(packets: Packet[]): JSX.Element {
     case PacketType.MEMORY_TOOL_START:
     case PacketType.MEMORY_TOOL_NO_ACCESS:
       return <SvgBookOpen className="w-3.5 h-3.5" />;
+    case PacketType.GENERATE_DOCX_START:
+      return <SvgFileText className="w-3.5 h-3.5" />;
     default:
       return <SvgCircle className="w-3.5 h-3.5" />;
   }
