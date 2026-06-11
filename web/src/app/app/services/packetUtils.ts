@@ -30,6 +30,8 @@ export function isToolPacket(
     PacketType.MEMORY_TOOL_START,
     PacketType.MEMORY_TOOL_DELTA,
     PacketType.MEMORY_TOOL_NO_ACCESS,
+    PacketType.GENERATE_DOCX_START,
+    PacketType.GENERATE_DOCX_RESULT,
     PacketType.DEEP_RESEARCH_PLAN_START,
     PacketType.DEEP_RESEARCH_PLAN_DELTA,
     PacketType.RESEARCH_AGENT_START,

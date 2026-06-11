@@ -102,6 +102,14 @@ export function useTimelineHeader(
       return { headerText: "Updating memory...", hasPackets, userStopped };
     }
 
+    if (packetType === PacketType.GENERATE_DOCX_START) {
+      return {
+        headerText: "Generating Word document",
+        hasPackets,
+        userStopped,
+      };
+    }
+
     if (packetType === PacketType.REASONING_START) {
       return { headerText: "Thinking", hasPackets, userStopped };
     }
