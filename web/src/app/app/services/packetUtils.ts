@@ -30,8 +30,6 @@ export function isToolPacket(
     PacketType.MEMORY_TOOL_START,
     PacketType.MEMORY_TOOL_DELTA,
     PacketType.MEMORY_TOOL_NO_ACCESS,
-    PacketType.GENERATE_DOCX_START,
-    PacketType.GENERATE_DOCX_RESULT,
     PacketType.DEEP_RESEARCH_PLAN_START,
     PacketType.DEEP_RESEARCH_PLAN_DELTA,
     PacketType.RESEARCH_AGENT_START,
@@ -59,10 +57,13 @@ export function isActualToolCallPacket(packet: Packet): boolean {
   );
 }
 
+// Display packets render in the message body (not the collapsed timeline),
+// like the generated-image card. The Word-doc card follows the same pattern.
 export function isDisplayPacket(packet: Packet) {
   return (
     packet.obj.type === PacketType.MESSAGE_START ||
-    packet.obj.type === PacketType.IMAGE_GENERATION_TOOL_START
+    packet.obj.type === PacketType.IMAGE_GENERATION_TOOL_START ||
+    packet.obj.type === PacketType.GENERATE_DOCX_START
   );
 }
 
