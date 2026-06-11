@@ -29,6 +29,8 @@ from onyx.server.query_and_chat.streaming_models import CustomToolStart
 from onyx.server.query_and_chat.streaming_models import FileReaderResult
 from onyx.server.query_and_chat.streaming_models import FileReaderStart
 from onyx.server.query_and_chat.streaming_models import GeneratedImage
+from onyx.server.query_and_chat.streaming_models import GenerateDocxResult
+from onyx.server.query_and_chat.streaming_models import GenerateDocxStart
 from onyx.server.query_and_chat.streaming_models import ImageGenerationFinal
 from onyx.server.query_and_chat.streaming_models import ImageGenerationToolStart
 from onyx.server.query_and_chat.streaming_models import IntermediateReportDelta
@@ -50,6 +52,7 @@ from onyx.server.query_and_chat.streaming_models import SearchToolQueriesDelta
 from onyx.server.query_and_chat.streaming_models import SearchToolStart
 from onyx.server.query_and_chat.streaming_models import SectionEnd
 from onyx.server.query_and_chat.streaming_models import TopLevelBranching
+from onyx.tools.tool_implementations.docx.generate_docx_tool import GenerateDocxTool
 from onyx.tools.tool_implementations.file_reader.file_reader_tool import FileReaderTool
 from onyx.tools.tool_implementations.images.image_generation_tool import (
     ImageGenerationTool,
@@ -262,6 +265,40 @@ def create_file_reader_packets(
         )
     except (json.JSONDecodeError, KeyError):
         # Gracefully degrade for old data that wasn't saved as JSON summary
+        pass
+
+    packets.append(Packet(placement=placement, obj=SectionEnd()))
+    return packets
+
+
+def create_generate_docx_packets(
+    response_json: str,
+    title: str,
+    turn_index: int,
+    tab_index: int = 0,
+) -> list[Packet]:
+    """Recreate GenerateDocxStart + GenerateDocxResult + SectionEnd from the
+    stored tool response so the GenerateDocxRenderer can display the document
+    card (with download / save-to-SharePoint actions) on page reload."""
+    packets: list[Packet] = []
+    placement = Placement(turn_index=turn_index, tab_index=tab_index)
+
+    packets.append(Packet(placement=placement, obj=GenerateDocxStart(title=title)))
+
+    try:
+        data = json.loads(response_json)
+        packets.append(
+            Packet(
+                placement=placement,
+                obj=GenerateDocxResult(
+                    file_id=data["file_id"],
+                    filename=data["filename"],
+                    title=title,
+                ),
+            )
+        )
+    except (json.JSONDecodeError, KeyError, TypeError):
+        # Gracefully degrade if the tool call failed or stored no response
         pass
 
     packets.append(Packet(placement=placement, obj=SectionEnd()))
@@ -599,6 +636,18 @@ def translate_assistant_message_to_packets(
                         turn_tool_packets.extend(
                             create_file_reader_packets(
                                 summary_json=tool_call.tool_call_response or "",
+                                turn_index=turn_num,
+                                tab_index=tool_call.tab_index,
+                            )
+                        )
+
+                    elif tool.in_code_tool_id == GenerateDocxTool.__name__:
+                        turn_tool_packets.extend(
+                            create_generate_docx_packets(
+                                response_json=tool_call.tool_call_response or "",
+                                title=str(
+                                    tool_call.tool_call_arguments.get("title") or ""
+                                ),
                                 turn_index=turn_num,
                                 tab_index=tool_call.tab_index,
                             )
