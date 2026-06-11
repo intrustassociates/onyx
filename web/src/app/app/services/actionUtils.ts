@@ -3,6 +3,7 @@ import type { IconProps } from "@opal/types";
 import { ToolSnapshot } from "@/lib/tools/interfaces";
 import {
   SvgCpu,
+  SvgFileText,
   SvgGlobe,
   SvgImage,
   SvgLink,
@@ -48,6 +49,12 @@ const isOpenUrlTool = (tool: ToolSnapshot): boolean => {
   );
 };
 
+const isGenerateDocxTool = (tool: ToolSnapshot): boolean => {
+  return (
+    tool.in_code_tool_id === "GenerateDocxTool" || tool.name === "generate_docx"
+  );
+};
+
 export function getIconForAction(
   action: ToolSnapshot
 ): (props: IconProps) => JSX.Element {
@@ -56,6 +63,7 @@ export function getIconForAction(
   if (isImageGenerationTool(action)) return SvgImage;
   if (isKnowledgeGraphTool(action)) return SvgServer;
   if (isOpenUrlTool(action)) return SvgLink;
+  if (isGenerateDocxTool(action)) return SvgFileText;
   return SvgCpu;
 }
 

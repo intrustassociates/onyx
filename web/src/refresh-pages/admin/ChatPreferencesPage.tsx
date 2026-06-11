@@ -43,6 +43,7 @@ import {
   WEB_SEARCH_TOOL_ID,
   PYTHON_TOOL_ID,
   OPEN_URL_TOOL_ID,
+  GENERATE_DOCX_TOOL_ID,
 } from "@/app/app/components/tools/constants";
 import { Button, Divider, Text, Card as OpalCard } from "@opal/components";
 import Modal from "@/refresh-components/Modal";
@@ -391,6 +392,9 @@ function ChatPreferencesForm() {
   );
   const codeInterpreterTool = availableTools.find(
     (t) => t.in_code_tool_id === PYTHON_TOOL_ID
+  );
+  const generateDocxTool = availableTools.find(
+    (t) => t.in_code_tool_id === GENERATE_DOCX_TOOL_ID
   );
 
   // Connectors
@@ -831,6 +835,28 @@ function ChatPreferencesForm() {
                               void toggleTool(codeInterpreterTool.id, checked)
                             }
                             disabled={!codeInterpreterTool}
+                          />
+                        </InputHorizontal>
+                      </Card>
+
+                      <Card variant={generateDocxTool ? undefined : "disabled"}>
+                        <InputHorizontal
+                          title="Word Document"
+                          description="Generate Microsoft Word (.docx) documents that can be saved directly to SharePoint."
+                          disabled={!generateDocxTool}
+                          withLabel
+                        >
+                          <Switch
+                            checked={
+                              generateDocxTool
+                                ? isToolEnabled(generateDocxTool.id)
+                                : false
+                            }
+                            onCheckedChange={(checked) =>
+                              generateDocxTool &&
+                              void toggleTool(generateDocxTool.id, checked)
+                            }
+                            disabled={!generateDocxTool}
                           />
                         </InputHorizontal>
                       </Card>
