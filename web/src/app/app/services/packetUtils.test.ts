@@ -177,6 +177,11 @@ describe("packetUtils", () => {
       expect(isDisplayPacket(packet)).toBe(true);
     });
 
+    test("returns true for GENERATE_DOCX_START", () => {
+      const packet = createPacket(PacketType.GENERATE_DOCX_START);
+      expect(isDisplayPacket(packet)).toBe(true);
+    });
+
     test("returns false for other packet types", () => {
       const packet = createPacket(PacketType.SEARCH_TOOL_START);
       expect(isDisplayPacket(packet)).toBe(false);
