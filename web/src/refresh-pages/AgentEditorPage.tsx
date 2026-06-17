@@ -30,6 +30,7 @@ import {
   PYTHON_TOOL_ID,
   SEARCH_TOOL_ID,
   OPEN_URL_TOOL_ID,
+  GENERATE_DOCX_TOOL_ID,
 } from "@/app/app/components/tools/constants";
 import Text from "@/refresh-components/texts/Text";
 import { Card } from "@/refresh-components/cards";
@@ -533,6 +534,9 @@ export default function AgentEditorPage({
   const codeInterpreterTool = availableTools?.find(
     (t) => t.in_code_tool_id === PYTHON_TOOL_ID
   );
+  const generateDocxTool = availableTools?.find(
+    (t) => t.in_code_tool_id === GENERATE_DOCX_TOOL_ID
+  );
   const isImageGenerationAvailable = !!imageGenTool;
   const imageGenerationDisabledTooltip = isImageGenerationAvailable
     ? undefined
@@ -627,6 +631,12 @@ export default function AgentEditorPage({
       !!codeInterpreterTool &&
       (existingAgent?.tools?.some(
         (tool) => tool.in_code_tool_id === PYTHON_TOOL_ID
+      ) ??
+        false),
+    generate_docx:
+      !!generateDocxTool &&
+      (existingAgent?.tools?.some(
+        (tool) => tool.in_code_tool_id === GENERATE_DOCX_TOOL_ID
       ) ??
         false),
     // MCP servers - dynamically add fields for each server with nested tool fields
@@ -767,6 +777,9 @@ export default function AgentEditorPage({
       }
       if (values.code_interpreter && codeInterpreterTool) {
         toolIds.push(codeInterpreterTool.id);
+      }
+      if (values.generate_docx && generateDocxTool) {
+        toolIds.push(generateDocxTool.id);
       }
 
       // Collect enabled MCP tool IDs
@@ -1448,6 +1461,24 @@ export default function AgentEditorPage({
                                 <SwitchField
                                   name="code_interpreter"
                                   disabled={!codeInterpreterTool}
+                                />
+                              </InputHorizontal>
+                            </Card>
+
+                            <Card
+                              variant={
+                                !!generateDocxTool ? undefined : "disabled"
+                              }
+                            >
+                              <InputHorizontal
+                                withLabel="generate_docx"
+                                title="Word Document"
+                                description="Generate Microsoft Word (.docx) documents from chat content."
+                                disabled={!generateDocxTool}
+                              >
+                                <SwitchField
+                                  name="generate_docx"
+                                  disabled={!generateDocxTool}
                                 />
                               </InputHorizontal>
                             </Card>
